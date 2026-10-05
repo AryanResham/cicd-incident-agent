@@ -21,6 +21,9 @@ from google.genai import errors as genai_errors
 from agent.classify import CATEGORIES, CORE, ISSUE_ONLY, SIMPLE, Classification
 
 DEFAULT_MODEL = "gemini-3.8-flash"  # override with the AGENT_MODEL variable
+# Tried in order when the main model is overloaded (5xx), missing (404) or out of daily quota.
+# Override with AGENT_FALLBACK_MODELS (comma-separated; empty string = no fallback).
+DEFAULT_FALLBACK_MODELS = ("gemini-3.5-flash-lite",)
 DEFAULT_RPM = 5  # conservative: free-tier Flash limits have been as low as 5 requests/minute
 MAX_WAIT = 120.0  # total seconds we are willing to wait on 429/5xx per call
 RETRYABLE = (429, 500, 502, 503, 504)
@@ -186,9 +189,11 @@ FIX_RULES = """Rules for the fix:
 
 class GeminiClient:
     def __init__(self, api_key: str | None = None, model: str | None = None, rpm: float = DEFAULT_RPM,
-                 max_wait: float = MAX_WAIT, client=None, sleep=time.sleep, clock=time.monotonic, log=print):
+                 max_wait: float = MAX_WAIT, client=None, sleep=time.sleep, clock=time.monotonic, log=print,
+                 fallback_models: tuple[str, ...] | list[str] = ()):
         self.api_key = api_key
         self.model = model or DEFAULT_MODEL
+        self.models = [self.model] + [m for m in fallback_models if m and m != self.model]
         self.max_wait = max_wait
         self._client = client
         self.sleep, self.clock, self.log = sleep, clock, log
@@ -197,8 +202,10 @@ class GeminiClient:
 
     @classmethod
     def from_env(cls, env=os.environ, **kwargs) -> "GeminiClient":
+        fallbacks = env.get("AGENT_FALLBACK_MODELS")
+        fallbacks = DEFAULT_FALLBACK_MODELS if fallbacks is None else [m.strip() for m in fallbacks.split(",")]
         return cls(api_key=env.get("GEMINI_API_KEY"), model=env.get("AGENT_MODEL") or None,
-                   rpm=float(env.get("AGENT_LLM_RPM") or DEFAULT_RPM), **kwargs)
+                   rpm=float(env.get("AGENT_LLM_RPM") or DEFAULT_RPM), fallback_models=fallbacks, **kwargs)
 
     def _sdk(self):
         if self._client is None:
@@ -215,20 +222,27 @@ class GeminiClient:
         client = self._sdk()
         config = types.GenerateContentConfig(system_instruction=SYSTEM, response_mime_type="application/json",
                                              response_json_schema=schema)
-        waited, attempt = 0.0, 0
+        waited, attempt, current = 0.0, 0, 0  # `current` indexes self.models
         while True:
             self.throttle.wait()
+            model = self.models[current]
             try:
                 self.calls += 1
-                response = client.models.generate_content(model=self.model, contents=prompt, config=config)
+                response = client.models.generate_content(model=model, contents=prompt, config=config)
                 break
             except genai_errors.APIError as exc:
+                daily = exc.code == 429 and is_daily_quota(exc)
+                # Overloaded, unknown or out of quota: the next model in the list may still work.
+                if (exc.code == 404 or daily or exc.code >= 500) and current + 1 < len(self.models):
+                    current += 1
+                    self.log(f"llm: {model} answered {exc.code}, switching to {self.models[current]}")
+                    continue
                 if exc.code not in RETRYABLE:
                     raise LLMUnavailable(f"Gemini error {exc.code}: {exc.message or exc}") from exc
-                if exc.code == 429 and is_daily_quota(exc):
+                if daily:
                     raise LLMUnavailable("Gemini daily quota exhausted") from exc
                 delay = retry_delay(exc) or min(60.0, 4.0 * 2 ** attempt)
-                reason = f"Gemini {exc.code}"
+                reason = f"Gemini {exc.code} ({model})"
             except httpx.HTTPError as exc:
                 delay, reason = min(60.0, 4.0 * 2 ** attempt), f"network error {type(exc).__name__}"
             if waited + delay > self.max_wait:

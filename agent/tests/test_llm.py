@@ -49,10 +49,10 @@ class Clock:
         self.t += s
 
 
-def client(*answers, rpm=1000, max_wait=120):
+def client(*answers, rpm=1000, max_wait=120, fallback_models=()):
     clock = Clock()
     c = llm.GeminiClient(client=FakeSDK(*answers), model="test-flash", rpm=rpm, max_wait=max_wait,
-                         sleep=clock.sleep, clock=clock, log=lambda *_: None)
+                         sleep=clock.sleep, clock=clock, log=lambda *_: None, fallback_models=fallback_models)
     return c, clock
 
 
@@ -100,6 +100,37 @@ def test_server_errors_use_exponential_backoff():
     c, clock = client(err, err, httpx.ConnectError("down"), GOOD_DIAGNOSIS)
     c.diagnose("e", RULE)
     assert clock.sleeps == [4.0, 8.0, 16.0]
+
+
+def test_overloaded_model_falls_back_to_the_next_one():
+    err = genai_errors.ServerError(503, {"error": {"code": 503, "message": "overloaded"}})
+    c, clock = client(err, GOOD_DIAGNOSIS, fallback_models=["test-lite"])
+    assert c.diagnose("e", RULE).kind == "simple"
+    assert [r["model"] for r in c._client.models.requests] == ["test-flash", "test-lite"]
+    assert all(s < 1 for s in clock.sleeps)  # switched straight away: only the throttle spacing, no backoff
+
+
+def test_missing_model_and_daily_quota_fall_back():
+    missing = genai_errors.ClientError(404, {"error": {"code": 404, "message": "model not found"}})
+    c, _ = client(missing, rate_limited(quota_id="GenerateRequestsPerDayPerProjectPerModel-FreeTier"),
+                  GOOD_DIAGNOSIS, fallback_models=["test-lite", "test-other"])
+    c.diagnose("e", RULE)
+    assert [r["model"] for r in c._client.models.requests] == ["test-flash", "test-lite", "test-other"]
+
+
+def test_last_model_still_retries_with_backoff():
+    err = genai_errors.ServerError(503, {"error": {"code": 503, "message": "overloaded"}})
+    c, clock = client(err, err, GOOD_DIAGNOSIS, fallback_models=["test-lite"])
+    c.diagnose("e", RULE)
+    assert [r["model"] for r in c._client.models.requests] == ["test-flash", "test-lite", "test-lite"]
+    assert [s for s in clock.sleeps if s >= 1] == [4.0]  # one backoff (ignoring throttle spacing)
+
+
+def test_fallback_models_from_env():
+    assert llm.GeminiClient.from_env({}).models == [llm.DEFAULT_MODEL, *llm.DEFAULT_FALLBACK_MODELS]
+    env = {"AGENT_MODEL": "a", "AGENT_FALLBACK_MODELS": "b, a ,c"}
+    assert llm.GeminiClient.from_env(env).models == ["a", "b", "c"]
+    assert llm.GeminiClient.from_env({"AGENT_FALLBACK_MODELS": ""}).models == [llm.DEFAULT_MODEL]
 
 
 def test_gives_up_after_about_two_minutes():
