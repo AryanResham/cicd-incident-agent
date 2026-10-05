@@ -1,4 +1,5 @@
 import io
+import json
 import zipfile
 
 from agent import collect
@@ -119,6 +120,19 @@ def test_collect_gathers_and_masks_everything(tmp_path):
     prompt = ev.to_prompt()
     assert "ModuleNotFoundError" in prompt and "Diff stable..broken" in prompt
     assert "LEAKED" not in prompt
+
+
+def test_collect_reads_the_verify_smoke_report(tmp_path):
+    gh = FakeGitHub()
+    run = gh.add_run(8, "broken", conclusion="failure", jobs={"verify": "failure"})
+    gh.artifacts[8] = [{"id": 2, "name": "smoke-report"}]
+    report = {"healthy": False, "checks": [
+        {"name": "GET /", "ok": False, "status_code": 500, "detail": "token=abcdefSECRET123 boom"},
+        {"name": "GET /health", "ok": True, "status_code": 200, "detail": ""}]}
+    gh.artifact_zips[2] = zip_bytes("smoke.json", json.dumps(report))
+    ev = collect.collect(gh, trigger="deploy_failure", run=run, repo_root=tmp_path, masker=Masker())
+    assert [c["name"] for c in ev.smoke["checks"] if not c["ok"]] == ["GET /"]
+    assert "SECRET" not in ev.failure_text() and "smoke GET / [500]" in ev.failure_text()
 
 
 def test_collect_survives_api_errors(tmp_path):

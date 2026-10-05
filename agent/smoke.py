@@ -225,7 +225,8 @@ def run_smoke(
             failed = ", ".join(r.name for r in results if not r.ok)
             if attempt < retries:
                 wait = backoff * (2 ** attempt)
-                log(f"round {rounds} failed ({failed}); retrying in {wait:.0f}s")
+                # Wording matters: "<n> failed" would look like a pytest summary to agent.classify.
+                log(f"round {rounds} unhealthy ({failed}); retrying in {wait:.0f}s")
                 sleep(wait)
         return SmokeReport(base_url, False, rounds, results)
 
