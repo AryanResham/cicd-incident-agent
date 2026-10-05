@@ -58,8 +58,10 @@ import sqlite3
 DATABASE_PATH = os.getenv("DATABASE_PATH", "./todos.db")
 
 
-def update(conn, todo_id, done):
-    conn.execute("UPDATE todos SET done = ? WHERE id = ?", (int(done), todo_id))
+def update(conn, todo_id, fields):
+    if "done" in fields:
+        fields["done"] = int(fields["done"])
+    conn.execute("UPDATE todos SET done = ? WHERE id = ?", (fields["done"], todo_id))
 
 
 def delete(conn, todo_id):
@@ -114,6 +116,8 @@ def test_planted_bugs_look_right(app_repo):
     assert "if not value" not in (app_repo / "app/main.py").read_text()
     ev_mod.apply_breaks(app_repo, by_id["C3"]["breaks"])
     assert 'return "done"' not in (app_repo / "app/status.py").read_text()
+    ev_mod.apply_breaks(app_repo, by_id["C1"]["breaks"])
+    assert 'fields["done"] = 0\n' in (app_repo / "app/db.py").read_text()  # PATCH, not create
     ev_mod.apply_breaks(app_repo, by_id["C5"]["breaks"])
     assert "(todo_id + 1,)" in (app_repo / "app/db.py").read_text()
     ev_mod.apply_breaks(app_repo, by_id["S7"]["breaks"])

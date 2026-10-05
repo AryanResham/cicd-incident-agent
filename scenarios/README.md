@@ -24,7 +24,7 @@ Each file has:
 | S7 | Required env var with no default | `os.getenv("DATABASE_PATH", ...)` → `os.environ["DATABASE_PATH"]` in `app/db.py` (the tests set it, the image and Render don't) | verify | SIMPLE / deploy_failure | **rollback** → auto-fix |
 | S8 | `tzdata` removed | delete the `tzdata` line from `requirements.txt` (CI runners have system time zones; the image uses only the package) | verify | SIMPLE / deploy_failure | **rollback** → auto-fix |
 | S9 | `index.html` not in the image | append `app/static/` to `.dockerignore` | verify (`GET /` 404) | SIMPLE / deploy_failure | **rollback** → auto-fix |
-| C1 ⭐ | Mark done is broken | `int(done)` → `0` in `app/db.py` (PATCH never stores done) | CI (test) | CORE / test_failure | issue + suggested PR (needs-human) |
+| C1 ⭐ | Mark done is broken | `fields["done"] = int(fields["done"])` → `= 0` in `update_todo()`, `app/db.py` (PATCH never stores done) | CI (test) | CORE / test_failure | issue + suggested PR (needs-human) |
 | C2 | Overdue off by one | `due_date < today` → `<=` in `app/status.py` | CI (test) | CORE / test_failure | issue + suggested PR |
 | C3 | Done + past deadline shows Overdue | remove the `if done: return "done"` branch in `app/status.py` | CI (test) | CORE / test_failure | issue + suggested PR |
 | C4 | PATCH wipes the deadline | `exclude_unset=True` → `False` in `app/main.py` | CI (test) | CORE / test_failure | issue + suggested PR |
