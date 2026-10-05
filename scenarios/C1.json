@@ -2,7 +2,7 @@
   "id": "C1",
   "demo": true,
   "group": "core",
-  "title": "Mark done is broken (PATCH never stores done=1)",
+  "title": "Mark done is broken (PATCH stores done=0, so the checkbox never flips)",
   "caught_by": "CI (test)",
   "expected": {
     "kind": "core",
@@ -12,8 +12,8 @@
   "breaks": [
     {
       "file": "app/db.py",
-      "regex": "int\\((\\w+\\.)?done\\)",
-      "replace": "0"
+      "regex": "(fields\\[[\"']done[\"']\\]\\s*=\\s*)int\\(fields\\[[\"']done[\"']\\]\\)",
+      "replace": "\\g<1>0"
     }
   ],
   "root_cause_keywords": [
@@ -24,11 +24,11 @@
     "failed_jobs": [
       {
         "name": "test",
-        "log": "FAILED tests/test_todos.py::test_mark_done - AssertionError: assert 'upcoming' == 'done'\n1 failed, 40 passed"
+        "log": "FAILED tests/test_api.py::test_mark_done_and_undo - AssertionError: assert 'upcoming' == 'done'\n1 failed, 291 passed"
       }
     ],
     "junit": [
-      "tests.test_todos::test_mark_done"
+      "tests.test_api::test_mark_done_and_undo"
     ]
   }
 }
