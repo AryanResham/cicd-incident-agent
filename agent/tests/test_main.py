@@ -141,6 +141,23 @@ def test_llm_unavailable_means_diagnosis_pending(repo):
     assert w.gh.prs == {}
 
 
+def test_rerun_after_diagnosis_pending_resumes_the_same_incident(repo):
+    w = World(repo, llm=FakeLLM(down=True, fixes=[DEP_FIX]), evidence=dep_evidence())
+    w.fail(2, "broken2")
+    number = w.issue()["number"]
+    assert w.gh.prs == {}
+
+    w.llm.down = False  # Gemini is back; the incident is handled again (workflow_dispatch)
+    w.agent.run("ci_failure", "2")
+    assert len(w.gh.issues) == 1  # same incident, not a new one
+    assert "One incident at a time" not in w.all_comments(number)
+    assert "Retrying the pending diagnosis" in w.all_comments(number)
+    pr = next(iter(w.gh.prs.values()))
+    assert pr["head"]["ref"] == f"agent/fix-{number}-1" and w.gh.auto_merge == [pr["node_id"]]
+    assert "needs-human" not in w.gh.labels_of(number)
+    assert report.read_state(w.issue()["body"])["diagnosis_pending"] is False
+
+
 def test_issue_only_never_calls_the_llm(repo):
     ev = Evidence(trigger="ci_failure", failed_jobs=[FailedJob("build", "failure", [], "Error: Bad credentials")])
     w = World(repo, evidence=ev)
