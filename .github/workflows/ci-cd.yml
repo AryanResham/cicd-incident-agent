@@ -1,0 +1,199 @@
+# Main pipeline (PLAN §A7): test -> build -> deploy -> verify.
+#   pull_request to main : test + build (the image is built, not pushed)
+#   push to main         : test + build + push to GHCR + deploy to Render + verify the live app
+# The incident agent (incident-agent.yml) listens to this workflow by its name "CI/CD" and matches
+# the job ids test / build / deploy / verify, so keep both stable.
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Least privilege by default; jobs widen it only where needed.
+permissions:
+  contents: read
+
+# One run per ref at a time. On main an in-progress deploy is never cancelled (a newer push waits);
+# on pull requests a new push cancels the outdated run.
+concurrency:
+  group: ci-cd-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+
+      # agent/tests import the Gemini SDK, so the agent's requirements are installed too.
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt -r requirements-agent.txt
+
+      - name: Run app and agent tests
+        run: python -m pytest tests agent/tests --junitxml=junit.xml
+
+      # The incident agent reads the failing tests from this artifact (name is part of the contract).
+      - name: Upload JUnit results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-results
+          path: junit.xml
+          retention-days: 14
+          if-no-files-found: warn
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write   # push to GHCR
+    outputs:
+      image: ${{ steps.image.outputs.ref }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Image name (GHCR rejects uppercase)
+        id: image
+        env:
+          PUSH: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        run: |
+          name="ghcr.io/${GITHUB_REPOSITORY,,}"
+          tags="$name:$GITHUB_SHA"
+          if [ "$PUSH" = "true" ]; then tags="$tags,$name:latest"; fi
+          echo "ref=$name:$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+          echo "tags=$tags" >> "$GITHUB_OUTPUT"
+          echo "Image: $name:$GITHUB_SHA (push: $PUSH)"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build (and push on main)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          tags: ${{ steps.image.outputs.tags }}
+          build-args: APP_VERSION=${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: read          # deploy freeze: is an incident open?
+      pull-requests: read   # deploy freeze: does this commit come from an agent fix PR?
+    outputs:
+      deployed: ${{ steps.hook.outputs.deployed == 'true' }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+
+      - name: Install agent dependencies
+        run: pip install -r requirements-agent.txt
+
+      # While an incident is open only the agent's fix commits are deployed (PLAN §B3, deploy freeze).
+      - name: Deploy freeze check
+        id: freeze
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: python -m agent.freeze --sha ${{ github.sha }}
+
+      - name: Deploy image to Render
+        id: hook
+        if: steps.freeze.outputs.deploy == 'true'
+        env:
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+          IMAGE: ${{ needs.build.outputs.image }}
+        run: |
+          if [ -z "$RENDER_DEPLOY_HOOK_URL" ]; then
+            echo "::error::RENDER_DEPLOY_HOOK_URL is not set"
+            exit 1
+          fi
+          image_param=$(python -c 'import os, urllib.parse; print(urllib.parse.quote(os.environ["IMAGE"], safe=""))')
+          echo "Deploying $IMAGE"
+          # The hook URL already has ?key=<secret>; never echo it.
+          code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST --max-time 30 --retry 2 \
+                   "$RENDER_DEPLOY_HOOK_URL&imgURL=$image_param") || code="000"
+          if [ "${code:0:1}" != "2" ]; then
+            echo "::error::Render deploy hook answered HTTP $code"
+            exit 1
+          fi
+          echo "deployed=true" >> "$GITHUB_OUTPUT"
+          echo "Render accepted the deploy (HTTP $code)"
+
+      - name: Not deployed (deploy freeze)
+        if: steps.freeze.outputs.deploy != 'true'
+        env:
+          REASON: ${{ steps.freeze.outputs.reason }}
+        run: echo "::notice::Not deployed. $REASON"
+
+  verify:
+    needs: deploy
+    # Only when the deploy really happened: a skipped verify must never count as a stable version.
+    if: needs.deploy.outputs.deployed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+
+      - name: Install agent dependencies
+        run: pip install -r requirements-agent.txt
+
+      # Render keeps the old version serving until the new image is up (and for good if it never
+      # starts), so first wait until /health reports this commit, then run the smoke checks.
+      - name: Wait for the new version, then smoke-check the live app
+        env:
+          RENDER_APP_URL: ${{ vars.RENDER_APP_URL }}
+        run: |
+          if [ -z "$RENDER_APP_URL" ]; then
+            echo "::error::RENDER_APP_URL is not set (repository variable)"
+            exit 1
+          fi
+          python -m agent.smoke --url "$RENDER_APP_URL" --expect-version "$GITHUB_SHA" --wait 600 --json smoke.json
+
+      - name: Upload smoke report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-report
+          path: smoke.json
+          retention-days: 14
+          if-no-files-found: ignore
