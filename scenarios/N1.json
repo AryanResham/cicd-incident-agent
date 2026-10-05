@@ -1,0 +1,26 @@
+{
+  "id": "N1",
+  "group": "no_fix",
+  "title": "RENDER_DEPLOY_HOOK_URL secret missing",
+  "caught_by": "deploy",
+  "expected": {
+    "kind": "issue_only",
+    "category": "config_secret",
+    "path": "issue naming the secret"
+  },
+  "breaks": [],
+  "manual": "Delete (or rename) the RENDER_DEPLOY_HOOK_URL repository secret, then push any commit.",
+  "root_cause_keywords": [
+    "RENDER_DEPLOY_HOOK_URL"
+  ],
+  "simulated": {
+    "trigger": "deploy_failure",
+    "failed_jobs": [
+      {
+        "name": "deploy",
+        "log": "Error: RENDER_DEPLOY_HOOK_URL is not set\n##[error]Process completed with exit code 1."
+      }
+    ]
+  },
+  "demo": false
+}

@@ -1,0 +1,34 @@
+{
+  "id": "C1",
+  "demo": true,
+  "group": "core",
+  "title": "Mark done is broken (PATCH never stores done=1)",
+  "caught_by": "CI (test)",
+  "expected": {
+    "kind": "core",
+    "category": "test_failure",
+    "path": "issue + suggested PR"
+  },
+  "breaks": [
+    {
+      "file": "app/db.py",
+      "regex": "int\\((\\w+\\.)?done\\)",
+      "replace": "0"
+    }
+  ],
+  "root_cause_keywords": [
+    "done"
+  ],
+  "simulated": {
+    "trigger": "ci_failure",
+    "failed_jobs": [
+      {
+        "name": "test",
+        "log": "FAILED tests/test_todos.py::test_mark_done - AssertionError: assert 'upcoming' == 'done'\n1 failed, 40 passed"
+      }
+    ],
+    "junit": [
+      "tests.test_todos::test_mark_done"
+    ]
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "id": "S9",
+  "group": "simple",
+  "title": "index.html not copied into the image (`app/static/` added to .dockerignore)",
+  "caught_by": "verify (smoke: GET / 404)",
+  "expected": {
+    "kind": "simple",
+    "category": "deploy_failure",
+    "path": "rollback -> auto-fix"
+  },
+  "breaks": [
+    {
+      "file": ".dockerignore",
+      "append": "app/static/\n"
+    }
+  ],
+  "root_cause_keywords": [
+    "dockerignore",
+    "static"
+  ],
+  "simulated": {
+    "trigger": "deploy_failure",
+    "failed_jobs": [
+      {
+        "name": "verify",
+        "log": ""
+      }
+    ],
+    "smoke_failed": [
+      "GET /"
+    ],
+    "changed_files": [
+      ".dockerignore"
+    ],
+    "diff": "--- .dockerignore (modified)\n@@ -4,0 +5 @@\n+app/static/"
+  },
+  "demo": false
+}
