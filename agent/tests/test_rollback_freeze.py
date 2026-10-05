@@ -1,7 +1,7 @@
 import httpx
 
 from agent import freeze, rollback
-from agent.smoke import SmokeReport
+from agent.smoke import CheckResult, SmokeReport
 from agent.tests.fakes import FakeGitHub
 
 
@@ -62,10 +62,20 @@ def smoke_sequence(*healthy):
     return fake
 
 
-def do_rollback(gh, smoke_fn, calls, status=200, hook="https://hook.test/deploy?key=s3cret"):
+def version_live(waited=30.0, ok=True, seen=None):
+    """Fake wait_for_version: records its call and 'waits' on the fake clock."""
+    def fake(url, expected, *, timeout, poll_every, accept_missing, sleep, clock, log):
+        seen.append((expected, accept_missing)) if seen is not None else None
+        sleep(waited)
+        return CheckResult("version", ok, "version live" if ok else "new version did not go live")
+    return fake
+
+
+def do_rollback(gh, smoke_fn, calls, status=200, hook="https://hook.test/deploy?key=s3cret", version_fn=None):
     clock = Clock()
     return rollback.rollback(gh, hook_url=hook, app_url="https://app.test", broken_sha="bad",
-                             http=hook_client(calls, status), smoke_fn=smoke_fn, sleep=clock.sleep,
+                             http=hook_client(calls, status), smoke_fn=smoke_fn,
+                             version_fn=version_fn or version_live(), sleep=clock.sleep,
                              clock=clock, log=lambda *_: None, max_wait=120, poll_every=30)
 
 
@@ -73,12 +83,23 @@ def test_rollback_deploys_stable_image_and_waits_until_healthy():
     gh = FakeGitHub()
     gh.add_run(2, "bad", conclusion="failure", jobs={"verify": "failure"})
     gh.add_run(1, "good")
-    calls = []
-    result = do_rollback(gh, smoke_sequence(False, True), calls)
+    calls, seen = [], []
+    result = do_rollback(gh, smoke_sequence(False, True), calls, version_fn=version_live(seen=seen))
     assert result.ok and not result.escalate
     assert result.stable_sha == "good"
     assert calls == ["https://hook.test/deploy?key=s3cret&imgURL=ghcr.io%2Fme%2Ftodo%3Agood"]
-    assert result.seconds == 60
+    assert seen == [("good", True)]  # waited for the stable SHA (old images without a version are fine)
+    assert result.seconds == 60  # 30 s until the version was live + one 30 s smoke retry
+
+
+def test_rollback_whose_version_never_goes_live_escalates_without_smoke_checks():
+    gh = FakeGitHub()
+    gh.add_run(1, "good")
+    calls = []
+    result = do_rollback(gh, smoke_sequence(), calls, version_fn=version_live(waited=120, ok=False))
+    assert not result.ok and result.escalate
+    assert "did not go live" in result.reason and result.smoke is None
+    assert len(calls) == 1
 
 
 def test_rollback_that_never_gets_healthy_escalates_without_retrying():
