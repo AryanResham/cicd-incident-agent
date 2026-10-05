@@ -141,7 +141,7 @@
       });
       box.onchange = () => run(() => api('PATCH', `/api/todos/${t.id}`, { done: box.checked }));
       const text = el('div', 'flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1');
-      text.append(el('span', t.done ? 'break-words text-gray-400 line-through' : 'break-words', { textContent: t.title }));
+      text.append(el('span', t.done ? 'min-w-0 break-words text-gray-400 line-through' : 'min-w-0 break-words', { textContent: t.title }));
       const b = badge(t);
       if (b) text.append(b);
       const li = el('li', 'flex items-center gap-3 px-4 py-3');
