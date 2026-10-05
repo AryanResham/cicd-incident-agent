@@ -1,0 +1,18 @@
+{
+  "id": "E3",
+  "group": "guardrail",
+  "title": "A random push while an incident is open",
+  "caught_by": "deploy freeze",
+  "expected": {
+    "kind": "-",
+    "category": "-",
+    "path": "deploy=false (freeze)"
+  },
+  "breaks": [],
+  "manual": "With an open `incident:active` issue, push an unrelated commit to main: deploy is skipped.",
+  "root_cause_keywords": [],
+  "simulated": {
+    "trigger": "freeze"
+  },
+  "demo": false
+}

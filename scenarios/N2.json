@@ -1,0 +1,27 @@
+{
+  "id": "N2",
+  "group": "no_fix",
+  "title": "The app goes down outside a deploy (service suspended on Render)",
+  "caught_by": "health monitor",
+  "expected": {
+    "kind": "issue_only",
+    "category": "deploy_failure",
+    "path": "rollback -> issue"
+  },
+  "breaks": [],
+  "manual": "Suspend the service in the Render dashboard (resume it afterwards) and wait for the health monitor.",
+  "root_cause_keywords": [
+    "down"
+  ],
+  "simulated": {
+    "trigger": "health",
+    "failed_jobs": [],
+    "smoke_failed": [
+      "GET /health",
+      "GET /",
+      "GET /api/todos",
+      "round trip"
+    ]
+  },
+  "demo": false
+}

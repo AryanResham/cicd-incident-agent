@@ -1,0 +1,33 @@
+{
+  "id": "S3",
+  "group": "simple",
+  "title": "Syntax error (colon removed from the first `def` in app/status.py)",
+  "caught_by": "CI (test: SyntaxError)",
+  "expected": {
+    "kind": "simple",
+    "category": "code_error",
+    "path": "auto-fix"
+  },
+  "breaks": [
+    {
+      "file": "app/status.py",
+      "regex": "^(def \\w+\\([^\\n]*\\)[^:\\n]*):",
+      "replace": "\\1"
+    }
+  ],
+  "root_cause_keywords": [
+    "syntax",
+    "status.py"
+  ],
+  "simulated": {
+    "trigger": "ci_failure",
+    "failed_jobs": [
+      {
+        "name": "test",
+        "log": "  File \"/home/runner/work/todo/todo/app/status.py\", line 12\n    def compute_status(todo, today) -> str\n                                          ^\nE   SyntaxError: expected ':'"
+      }
+    ],
+    "junit": []
+  },
+  "demo": false
+}

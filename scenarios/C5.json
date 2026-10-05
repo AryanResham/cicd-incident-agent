@@ -1,0 +1,35 @@
+{
+  "id": "C5",
+  "group": "core",
+  "title": "Delete removes the wrong item (id + 1)",
+  "caught_by": "CI (test)",
+  "expected": {
+    "kind": "core",
+    "category": "test_failure",
+    "path": "issue + suggested PR"
+  },
+  "breaks": [
+    {
+      "file": "app/db.py",
+      "regex": "(DELETE FROM todos WHERE id\\s*=\\s*\\?[\\\"']\\s*,\\s*\\(\\s*)(\\w+)",
+      "replace": "\\1\\2 + 1"
+    }
+  ],
+  "root_cause_keywords": [
+    "delete",
+    "id"
+  ],
+  "simulated": {
+    "trigger": "ci_failure",
+    "failed_jobs": [
+      {
+        "name": "test",
+        "log": "FAILED tests/test_todos.py::test_delete - assert 404 == 204"
+      }
+    ],
+    "junit": [
+      "tests.test_todos::test_delete"
+    ]
+  },
+  "demo": false
+}

@@ -1,0 +1,35 @@
+{
+  "id": "C8",
+  "group": "core",
+  "title": "Validation removed (blank titles accepted: min_length 1 -> 0)",
+  "caught_by": "CI (test)",
+  "expected": {
+    "kind": "core",
+    "category": "test_failure",
+    "path": "issue + suggested PR"
+  },
+  "breaks": [
+    {
+      "file": "app/main.py",
+      "regex": "min_length\\s*=\\s*1\\b",
+      "replace": "min_length=0"
+    }
+  ],
+  "root_cause_keywords": [
+    "validation",
+    "min_length"
+  ],
+  "simulated": {
+    "trigger": "ci_failure",
+    "failed_jobs": [
+      {
+        "name": "test",
+        "log": "FAILED tests/test_validation.py::test_blank_title - assert 201 == 422"
+      }
+    ],
+    "junit": [
+      "tests.test_validation::test_blank_title"
+    ]
+  },
+  "demo": false
+}

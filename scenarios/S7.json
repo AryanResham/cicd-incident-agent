@@ -1,0 +1,42 @@
+{
+  "id": "S7",
+  "group": "simple",
+  "title": "Required env var with no default (`DATABASE_PATH` read with os.environ[...]) -> crash at startup",
+  "caught_by": "verify (smoke checks)",
+  "expected": {
+    "kind": "simple",
+    "category": "deploy_failure",
+    "path": "rollback -> auto-fix"
+  },
+  "breaks": [
+    {
+      "file": "app/db.py",
+      "regex": "os\\.(?:getenv|environ\\.get)\\(\\s*[\\\"']DATABASE_PATH[\\\"']\\s*,\\s*[^)]*\\)",
+      "replace": "os.environ[\"DATABASE_PATH\"]"
+    }
+  ],
+  "root_cause_keywords": [
+    "DATABASE_PATH",
+    "default"
+  ],
+  "simulated": {
+    "trigger": "deploy_failure",
+    "failed_jobs": [
+      {
+        "name": "verify",
+        "log": ""
+      }
+    ],
+    "smoke_failed": [
+      "GET /health",
+      "GET /",
+      "GET /api/todos",
+      "round trip"
+    ],
+    "changed_files": [
+      "app/db.py"
+    ],
+    "diff": "--- app/db.py (modified)\n@@ -5 +5 @@\n-DATABASE_PATH = os.getenv(\"DATABASE_PATH\", \"./todos.db\")\n+DATABASE_PATH = os.environ[\"DATABASE_PATH\"]"
+  },
+  "demo": false
+}

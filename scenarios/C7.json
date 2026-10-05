@@ -1,0 +1,35 @@
+{
+  "id": "C7",
+  "group": "core",
+  "title": "Route path renamed (`/api/todos` -> `/api/todo` on the list route)",
+  "caught_by": "CI (test)",
+  "expected": {
+    "kind": "core",
+    "category": "test_failure",
+    "path": "issue + suggested PR"
+  },
+  "breaks": [
+    {
+      "file": "app/main.py",
+      "regex": "(@\\w+\\.get\\(\\s*[\\\"'])/api/todos([\\\"'])",
+      "replace": "\\1/api/todo\\2"
+    }
+  ],
+  "root_cause_keywords": [
+    "/api/todo",
+    "route"
+  ],
+  "simulated": {
+    "trigger": "ci_failure",
+    "failed_jobs": [
+      {
+        "name": "test",
+        "log": "FAILED tests/test_todos.py::test_list - assert 404 == 200"
+      }
+    ],
+    "junit": [
+      "tests.test_todos::test_list"
+    ]
+  },
+  "demo": false
+}
