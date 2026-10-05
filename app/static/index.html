@@ -23,6 +23,12 @@
     </form>
     <p id="error" class="mt-2 text-sm text-red-600" role="alert" hidden></p>
 
+    <nav class="mt-4 flex gap-1 text-sm">
+      <button data-filter="all" class="rounded-md px-3 py-1 aria-pressed:bg-gray-900 aria-pressed:text-white">All</button>
+      <button data-filter="open" class="rounded-md px-3 py-1 aria-pressed:bg-gray-900 aria-pressed:text-white">Open</button>
+      <button data-filter="done" class="rounded-md px-3 py-1 aria-pressed:bg-gray-900 aria-pressed:text-white">Done</button>
+    </nav>
+
     <ul id="list" class="mt-4 divide-y divide-gray-200 rounded-lg border border-gray-200 bg-white"></ul>
     <p id="empty" class="mt-4 py-8 text-center text-gray-500" hidden></p>
   </main>
@@ -36,17 +42,17 @@
       due_tomorrow: ['Due tomorrow', 'bg-amber-100 text-amber-800'],
       upcoming: [null, 'bg-gray-100 text-gray-600'],
     };
+    const EMPTY = { all: 'Nothing here yet. Add your first todo above.', open: 'No open todos.', done: 'Nothing done yet.' };
+    const INPUT = 'rounded-md border border-gray-300 px-2 py-1';
     let todos = [];
+    let filter = 'all';
+    let editingId = null;
 
     // fetch() wrapper: returns parsed JSON (or null for 204) and throws an Error with a readable message.
     async function api(method, path, body) {
       let res;
       try {
-        res = await fetch(path, {
-          method,
-          headers: body ? { 'Content-Type': 'application/json' } : {},
-          body: body ? JSON.stringify(body) : undefined,
-        });
+        res = await fetch(path, { method, headers: { 'Content-Type': 'application/json' }, body: body && JSON.stringify(body) });
       } catch {
         throw new Error('Could not reach the server. Please try again.');
       }
@@ -69,12 +75,10 @@
       $('error').hidden = !message;
     }
 
-    // Small DOM helper. Text always goes in via textContent, never innerHTML.
-    function el(tag, className, text) {
-      const node = document.createElement(tag);
-      if (className) node.className = className;
-      if (text != null) node.textContent = text;
-      return node;
+    // Small DOM helper: el('span', 'classes', { textContent: ..., onclick: ... }).
+    // User text always goes in via textContent, never innerHTML.
+    function el(tag, className, props = {}) {
+      return Object.assign(document.createElement(tag), { className }, props);
     }
 
     function formatDate(iso) {
@@ -85,9 +89,8 @@
     function badge(t) {
       const [label, colors] = BADGES[t.status] || [];
       if (!colors) return null;
-      const span = el('span', `rounded-full px-2 py-0.5 text-xs font-medium ${colors}`, label || formatDate(t.due_date));
-      span.title = `Due ${t.due_date}`;
-      return span;
+      return el('span', `rounded-full px-2 py-0.5 text-xs font-medium ${colors}`,
+        { textContent: label || formatDate(t.due_date), title: `Due ${t.due_date}` });
     }
 
     // An empty or half-typed native date input both have value "", so catch the half-typed case.
@@ -96,59 +99,85 @@
       return input.value || null;
     }
 
-    // Runs one change against the API, then reloads. Returns false (and shows the error) if it failed.
+    // Runs one change against the API, then reloads the list and summary.
     async function run(action) {
       try {
         await action();
+        showError('');
       } catch (err) {
         showError(err.message);
-        return false;
+        if (editingId !== null) return; // keep what the user typed in the edit row
+        render(); // e.g. untick a checkbox whose PATCH failed
       }
-      showError('');
       await load();
-      return true;
     }
 
     async function load() {
       try {
-        todos = await api('GET', '/api/todos');
+        const [list, s] = await Promise.all([api('GET', '/api/todos'), api('GET', '/api/todos/summary')]);
+        todos = list;
+        $('summary').textContent = `${s.overdue} overdue · ${s.due_soon} due soon · ${s.open} open · ${s.done} done`;
         render();
       } catch (err) {
         showError(err.message);
       }
     }
 
+    // Filters client-side and keeps the server's sort order.
     function render() {
-      $('list').replaceChildren(...todos.map(viewRow));
-      $('list').hidden = todos.length === 0;
-      $('empty').hidden = todos.length > 0;
-      $('empty').textContent = 'Nothing here yet. Add your first todo above.';
+      const shown = todos.filter((t) => filter === 'all' || t.done === (filter === 'done'));
+      $('list').replaceChildren(...shown.map((t) => (t.id === editingId ? editRow(t) : viewRow(t))));
+      $('list').hidden = shown.length === 0;
+      $('empty').hidden = shown.length > 0;
+      $('empty').textContent = EMPTY[filter];
+      for (const tab of document.querySelectorAll('[data-filter]')) {
+        tab.setAttribute('aria-pressed', tab.dataset.filter === filter);
+      }
     }
 
     function viewRow(t) {
-      const li = el('li', 'flex items-center gap-3 px-4 py-3');
-      const box = el('input', 'h-4 w-4 shrink-0 accent-blue-600');
-      box.type = 'checkbox';
-      box.checked = t.done;
-      box.setAttribute('aria-label', t.done ? 'Mark as not done' : 'Mark as done');
-      box.onchange = async () => {
-        if (!(await run(() => api('PATCH', `/api/todos/${t.id}`, { done: box.checked })))) box.checked = t.done;
-      };
+      const box = el('input', 'h-4 w-4 shrink-0 accent-blue-600', {
+        type: 'checkbox', checked: t.done, ariaLabel: t.done ? 'Mark as not done' : 'Mark as done',
+      });
+      box.onchange = () => run(() => api('PATCH', `/api/todos/${t.id}`, { done: box.checked }));
       const text = el('div', 'flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1');
-      text.append(el('span', 'break-words' + (t.done ? ' text-gray-400 line-through' : ''), t.title));
+      text.append(el('span', t.done ? 'break-words text-gray-400 line-through' : 'break-words', { textContent: t.title }));
       const b = badge(t);
       if (b) text.append(b);
-      li.append(box, text, iconButton('🗑', 'Delete', () => remove(t)));
+      const li = el('li', 'flex items-center gap-3 px-4 py-3');
+      li.append(box, text, iconButton('✏️', 'Edit', () => startEdit(t)), iconButton('🗑', 'Delete', () => remove(t)));
       return li;
     }
 
-    function iconButton(icon, label, onClick) {
-      const btn = el('button', 'shrink-0 rounded p-1 hover:bg-gray-100', icon);
-      btn.type = 'button';
-      btn.title = label;
-      btn.setAttribute('aria-label', label);
-      btn.onclick = onClick;
-      return btn;
+    // Inline edit: title + date inputs with Save/Cancel. Enter saves, Escape cancels.
+    function editRow(t) {
+      const title = el('input', `${INPUT} min-w-0 flex-1 basis-40`,
+        { id: 'edit-title', value: t.title, maxLength: 200, ariaLabel: 'Title' });
+      const due = el('input', INPUT, { type: 'date', value: t.due_date || '', ariaLabel: 'Deadline (clear it to remove)' });
+      const save = () => run(async () => {
+        await api('PATCH', `/api/todos/${t.id}`, { title: title.value, due_date: dateValue(due) });
+        editingId = null;
+      });
+      const cancel = () => { editingId = null; showError(''); render(); };
+      title.onkeydown = due.onkeydown = (e) => {
+        if (e.key === 'Enter') save();
+        if (e.key === 'Escape') cancel();
+      };
+      const li = el('li', 'flex flex-wrap items-center gap-2 px-4 py-3');
+      li.append(title, due,
+        el('button', 'rounded-md bg-blue-600 px-3 py-1 text-sm text-white hover:bg-blue-700', { textContent: 'Save', onclick: save }),
+        el('button', 'rounded-md px-3 py-1 text-sm text-gray-600 hover:bg-gray-100', { textContent: 'Cancel', onclick: cancel }));
+      return li;
+    }
+
+    function iconButton(icon, label, onclick) {
+      return el('button', 'shrink-0 rounded p-1 hover:bg-gray-100', { textContent: icon, title: label, ariaLabel: label, onclick });
+    }
+
+    function startEdit(t) {
+      editingId = t.id;
+      render();
+      $('edit-title').focus();
     }
 
     function remove(t) {
@@ -163,6 +192,10 @@
         $('title').focus();
       });
     };
+
+    for (const tab of document.querySelectorAll('[data-filter]')) {
+      tab.onclick = () => { filter = tab.dataset.filter; render(); };
+    }
 
     load();
   </script>
