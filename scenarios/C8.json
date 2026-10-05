@@ -26,11 +26,11 @@
     "failed_jobs": [
       {
         "name": "test",
-        "log": "FAILED tests/test_api.py::test_create_rejects_invalid_body[body0] - assert 201 == 422\nFAILED tests/test_integration.py::test_title_errors_are_readable_on_the_page - assert 201 == 422\n2 failed, 290 passed"
+        "log": "FAILED tests/test_api.py::test_create_rejects_invalid_body[body1] - assert 201 == 422\nFAILED tests/test_integration.py::test_title_errors_are_readable_on_the_page - assert 201 == 422\n5 failed, 87 passed"
       }
     ],
     "junit": [
-      "tests.test_api::test_create_rejects_invalid_body[body0]",
+      "tests.test_api::test_create_rejects_invalid_body[body1]",
       "tests.test_integration::test_title_errors_are_readable_on_the_page"
     ]
   },
