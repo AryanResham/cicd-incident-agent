@@ -1,7 +1,7 @@
 {
   "id": "S8",
   "group": "simple",
-  "title": "`tzdata` removed from requirements.txt (zoneinfo fails only in the slim container)",
+  "title": "`tzdata` removed from requirements.txt: CI runners have system time zones, but the image only uses the pinned package (PYTHONTZPATH=\"\") -> zoneinfo fails at startup",
   "caught_by": "verify (smoke checks)",
   "expected": {
     "kind": "simple",
@@ -23,7 +23,7 @@
     "failed_jobs": [
       {
         "name": "verify",
-        "log": ""
+        "log": "Smoke checks for https://todo.onrender.com: UNHEALTHY (after 0 round(s))\n  FAIL  version 600.00s  new version did not go live within 600s: expected 3f2a9c1d0b7e, last seen version '9b1c7e2a4d10'\n##[error]Process completed with exit code 1."
       }
     ],
     "smoke_failed": [

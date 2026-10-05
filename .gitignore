@@ -10,6 +10,12 @@ venv/
 *.db
 *.db-journal
 
+# Eval / pipeline outputs
+scenarios/results*.md
+scenarios/results*.json
+junit.xml
+smoke.json
+
 # Editors / OS
 .vscode/
 .idea/
