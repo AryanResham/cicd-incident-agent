@@ -12,7 +12,8 @@ This report covers what was built, how it was built, how each part was checked, 
 |---|---|
 | **Pipeline** | First run fully green on GitHub: test ✅ → build ✅ → deploy ✅ → verify ✅ |
 | **Live app** | Running on Render; `/health` reports the exact commit SHA that was deployed |
-| **Tests** | **332 passing**: 92 app tests + 240 agent tests (run locally and on GitHub) |
+| **Tests** | **337 passing**: 92 app tests + 245 agent tests (run locally and on GitHub) |
+| **Live incident** | Scenario S1 detected, diagnosed by Gemini, fixed, auto-merged, deployed and verified **with no human input** (§4b) |
 | **Failure scenarios** | 22 scenarios; rule-based classification **22/22 correct**; planted-bug check **19/19** behave as designed |
 | **Commits** | 43 on `main` (38 work commits + 5 merges), all small and conventional (`feat`, `fix`, `test`, `ci`, `build`, `docs`, `chore`) |
 | **Code size** | App ~580 lines · App tests ~630 · Agent ~2,870 · Agent tests ~2,200 · Workflows ~415 |
@@ -121,10 +122,36 @@ It also confirmed that a restart doesn't duplicate the seed todos, and that a fr
 
 ---
 
+## 4b. First live incident: scenario S1 (real GitHub + Gemini + Render)
+
+A real bug was pushed to `main`: `app/main.py` imported `humanize`, which wasn't in `requirements.txt`.
+
+| Time (UTC) | What happened |
+|---|---|
+| 16:17 | CI failed at `test` (`ModuleNotFoundError`). Deploy was skipped, so **the live app was never affected** |
+| 16:17 | The agent opened incident #1; the rules classified it as **dependency / SIMPLE** |
+| 16:20 | Gemini's main model answered **503 (overloaded)** for 2 minutes → the agent degraded safely to "diagnosis pending" |
+| 16:25 | A manual retry showed **bug #1**: the retry was treated as a new failure and only noted |
+| 16:27 | Two fixes pushed (below), then the incident was re-run |
+| 16:28 | The main model was still 503 → **switched to `gemini-3.5-flash-lite`** → diagnosis: "humanize is imported but missing from requirements.txt" (SIMPLE, confidence 1.00) |
+| 16:28 | Attempt 1: a one-line fix (`humanize==4.11.0`) **passed the pre-checks** (deps, pytest, docker build, container smoke) → PR #2 with auto-merge |
+| 16:30 | CI passed on the PR → **auto-merged** → deployed (allowed through the deploy freeze as an agent fix) |
+| 16:33 | `verify` passed on the live app → **incident #1 closed by itself**; the freeze lifted |
+
+**Time from detection to verified fix: ~16 minutes**, including ~10 minutes of finding and fixing the two bugs below. The agent's own fix cycle (diagnose → PR → merged → live and verified) took ~5 minutes.
+
+**Bugs the live test found (both fixed, with tests):**
+1. **No fallback when Gemini is overloaded:** the agent now tries the next model in `AGENT_FALLBACK_MODELS` (default `gemini-3.5-flash-lite`) on 5xx, 404 or an exhausted daily quota, before backing off.
+2. **"Re-run later" didn't resume the incident:** re-running the same failed run now picks up the pending incident instead of treating it as a second failure.
+
+---
+
 ## 5. Current live state
 
 - `main` is pushed to GitHub; the latest pipeline run is **all green**
-- The app is live on Render and serving commit `7f51ea7`
+- The app is live on Render and serving `1bc20c9`, **the agent's own fix from incident #1**
+- **Tests: 337 passing** (92 app + 245 agent)
+- Branch protection on `main` requires `test` + `build` ✅
 - Secrets: `AGENT_TOKEN`, `GEMINI_API_KEY`, `RENDER_DEPLOY_HOOK_URL` ✅
 - Variables: `RENDER_APP_URL`, `AGENT_ENABLED=true` ✅
 - The health monitor runs every ~10 minutes against the live app
@@ -136,9 +163,10 @@ It also confirmed that a restart doesn't duplicate the seed todos, and that a fr
 
 | Item | Status |
 |---|---|
-| Branch protection on `main` (require `test` + `build`) | **To do (you)**. Needed so auto-merge waits for CI |
-| Allow auto-merge + allow Actions to create PRs | Should be on (from setup); worth double-checking |
-| A real incident end to end (Gemini + PR + auto-merge + rollback on Render) | **Not run yet.** This is the next step and doubles as the demo rehearsal |
+| A real SIMPLE incident end to end (S1) | ✅ **Done**: see §4b |
+| A real rollback on Render (S6) | Not run yet. It's the next rehearsal |
+| A real CORE incident (C1) and give-up path (E1) | Not run yet |
+| Gemini availability | The main model (`gemini-3.8-flash`) was overloaded during the whole test; the fallback did the work. If that continues, set the variable `AGENT_MODEL=gemini-3.5-flash-lite` to use the lighter model directly |
 | Real Gemini eval over all scenarios | Not run. The free tier is probably too small for it in one day (Google may limit to ~20 requests/day); split it over days, use Flash-Lite, or enable billing. Check your limits at aistudio.google.com/rate-limit |
 | Gemini model name | Default `gemini-3.8-flash` (picked from Google's docs by the builder agent). Change it with the `AGENT_MODEL` variable if needed |
 
