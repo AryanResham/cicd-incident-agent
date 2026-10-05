@@ -9,7 +9,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, BeforeValidator, ConfigDict, StrictBool, StringConstraints
+from pydantic import AfterValidator, BaseModel, BeforeValidator, ConfigDict, StrictBool
 
 from app import clock, db
 from app.seed import seed_if_empty
@@ -29,7 +29,17 @@ def parse_due_date(value):
     return date.fromisoformat(value)  # raises ValueError for impossible dates
 
 
-Title = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
+def check_title(value: str) -> str:
+    """Trim the title and give messages the page can show as-is."""
+    value = value.strip()
+    if not value:
+        raise ValueError("Title can't be empty")
+    if len(value) > 200:
+        raise ValueError(f"Title is too long ({len(value)} characters, max 200)")
+    return value
+
+
+Title = Annotated[str, AfterValidator(check_title)]
 DueDate = Annotated[date | None, BeforeValidator(parse_due_date)]
 
 

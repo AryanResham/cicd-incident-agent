@@ -74,3 +74,18 @@ def test_full_user_journey(client):
     assert client.get(f"/api/todos/{todo_id}").status_code == 404
     assert ids(client) == seeded
     assert summary(client) == {"overdue": 1, "due_soon": 2, "open": 5, "done": 1}
+
+
+def test_title_errors_are_readable_on_the_page(client):
+    # The page shows each 422 `msg` to the user (minus pydantic's "Value error, " prefix).
+    cases = [("   ", "Title can't be empty"), ("x" * 201, "Title is too long (201 characters, max 200)")]
+    for title, message in cases:
+        for response in (
+            client.post("/api/todos", json={"title": title}),
+            client.patch("/api/todos/1", json={"title": title}),
+        ):
+            assert response.status_code == 422
+            error = response.json()["detail"][0]
+            assert error["loc"] == ["body", "title"]
+            assert error["msg"] == f"Value error, {message}"
+    assert client.get("/api/todos/1").json()["title"] == "Submit project title"  # unchanged
