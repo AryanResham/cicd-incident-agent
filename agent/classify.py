@@ -192,7 +192,7 @@ def _classify_production(ev: Evidence, jobs: list[str]) -> Classification:
 
 def combine(rule: Classification, llm_kind: str | None) -> str:
     """Gemini only refines: it can turn SIMPLE into CORE, never the other way round."""
-    if rule.kind == SIMPLE and llm_kind == CORE:
+    if rule.kind == SIMPLE and llm_kind in (CORE, ISSUE_ONLY):
         return CORE
     return rule.kind
 
