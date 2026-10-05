@@ -1,0 +1,35 @@
+{
+  "id": "C3",
+  "group": "core",
+  "title": "Done todos with a past deadline show as Overdue (the `done` branch is removed)",
+  "caught_by": "CI (test)",
+  "expected": {
+    "kind": "core",
+    "category": "test_failure",
+    "path": "issue + suggested PR"
+  },
+  "breaks": [
+    {
+      "file": "app/status.py",
+      "regex": "^[ \\t]*if\\s+(?:\\w+\\.|\\w+\\[[\\\"'])?done(?:[\\\"']\\])?\\s*:[ \\t]*\\n[ \\t]*return\\s+[\\\"']done[\\\"'][ \\t]*\\n",
+      "replace": ""
+    }
+  ],
+  "root_cause_keywords": [
+    "done",
+    "overdue"
+  ],
+  "simulated": {
+    "trigger": "ci_failure",
+    "failed_jobs": [
+      {
+        "name": "test",
+        "log": "FAILED tests/test_status.py::test_done_past_deadline - AssertionError: assert 'overdue' == 'done'"
+      }
+    ],
+    "junit": [
+      "tests.test_status::test_done_past_deadline"
+    ]
+  },
+  "demo": false
+}

@@ -1,0 +1,33 @@
+{
+  "id": "S2",
+  "group": "simple",
+  "title": "Missing import in the code (the `from fastapi import ...` line is deleted)",
+  "caught_by": "CI (test: NameError)",
+  "expected": {
+    "kind": "simple",
+    "category": "code_error",
+    "path": "auto-fix"
+  },
+  "breaks": [
+    {
+      "file": "app/main.py",
+      "regex": "^from fastapi import [^\\n]*\\n",
+      "replace": ""
+    }
+  ],
+  "root_cause_keywords": [
+    "import",
+    "fastapi"
+  ],
+  "simulated": {
+    "trigger": "ci_failure",
+    "failed_jobs": [
+      {
+        "name": "test",
+        "log": "  File \"/home/runner/work/todo/todo/app/main.py\", line 9, in <module>\n    app = FastAPI(title=\"To-Do\")\nE   NameError: name 'FastAPI' is not defined"
+      }
+    ],
+    "junit": []
+  },
+  "demo": false
+}

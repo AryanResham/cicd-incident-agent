@@ -1,0 +1,41 @@
+{
+  "id": "S8",
+  "group": "simple",
+  "title": "`tzdata` removed from requirements.txt (zoneinfo fails only in the slim container)",
+  "caught_by": "verify (smoke checks)",
+  "expected": {
+    "kind": "simple",
+    "category": "deploy_failure",
+    "path": "rollback -> auto-fix"
+  },
+  "breaks": [
+    {
+      "file": "requirements.txt",
+      "regex": "^tzdata[^\\n]*\\n?",
+      "replace": ""
+    }
+  ],
+  "root_cause_keywords": [
+    "tzdata"
+  ],
+  "simulated": {
+    "trigger": "deploy_failure",
+    "failed_jobs": [
+      {
+        "name": "verify",
+        "log": ""
+      }
+    ],
+    "smoke_failed": [
+      "GET /health",
+      "GET /",
+      "GET /api/todos",
+      "round trip"
+    ],
+    "changed_files": [
+      "requirements.txt"
+    ],
+    "diff": "--- requirements.txt (modified)\n@@ -3 +2,0 @@\n-tzdata==2026.5"
+  },
+  "demo": false
+}

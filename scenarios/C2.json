@@ -1,0 +1,35 @@
+{
+  "id": "C2",
+  "group": "core",
+  "title": "Overdue off by one (deadline today shows as Overdue: `<` -> `<=`)",
+  "caught_by": "CI (test)",
+  "expected": {
+    "kind": "core",
+    "category": "test_failure",
+    "path": "issue + suggested PR"
+  },
+  "breaks": [
+    {
+      "file": "app/status.py",
+      "regex": "(due_date\\s*)<(\\s*today)",
+      "replace": "\\1<=\\2"
+    }
+  ],
+  "root_cause_keywords": [
+    "overdue",
+    "<="
+  ],
+  "simulated": {
+    "trigger": "ci_failure",
+    "failed_jobs": [
+      {
+        "name": "test",
+        "log": "FAILED tests/test_status.py::test_due_today - AssertionError: assert 'overdue' == 'due_today'"
+      }
+    ],
+    "junit": [
+      "tests.test_status::test_due_today"
+    ]
+  },
+  "demo": false
+}

@@ -1,0 +1,35 @@
+{
+  "id": "C4",
+  "group": "core",
+  "title": "PATCH wipes the deadline when only the title changes (exclude_unset dropped)",
+  "caught_by": "CI (test)",
+  "expected": {
+    "kind": "core",
+    "category": "test_failure",
+    "path": "issue + suggested PR"
+  },
+  "breaks": [
+    {
+      "file": "app/main.py",
+      "regex": "exclude_unset\\s*=\\s*True",
+      "replace": "exclude_unset=False"
+    }
+  ],
+  "root_cause_keywords": [
+    "exclude_unset",
+    "due_date"
+  ],
+  "simulated": {
+    "trigger": "ci_failure",
+    "failed_jobs": [
+      {
+        "name": "test",
+        "log": "FAILED tests/test_todos.py::test_patch_title_keeps_deadline - AssertionError: assert None == '2026-10-07'"
+      }
+    ],
+    "junit": [
+      "tests.test_todos::test_patch_title_keeps_deadline"
+    ]
+  },
+  "demo": false
+}
