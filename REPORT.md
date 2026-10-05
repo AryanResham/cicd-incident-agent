@@ -149,7 +149,8 @@ A real bug was pushed to `main`: `app/main.py` imported `humanize`, which wasn't
 ## 5. Current live state
 
 - `main` is pushed to GitHub; the latest pipeline run is **all green**
-- The app is live on Render and serving `1bc20c9`, **the agent's own fix from incident #1**
+- The app is live on Render, serving the latest commit on `main` (which includes `6af0dbb`, **the agent's own fix from incident #1**)
+- Commit history was rewritten on 5 Oct to remove tool attribution lines from commit messages (code unchanged). Issue #1 and PR #2 still mention the old commit IDs: `d62faac` = `ce28848` (the planted bug), `1bc20c9` = `6af0dbb` (the agent's fix)
 - **Tests: 337 passing** (92 app + 245 agent)
 - Branch protection on `main` requires `test` + `build` ✅
 - Secrets: `AGENT_TOKEN`, `GEMINI_API_KEY`, `RENDER_DEPLOY_HOOK_URL` ✅
