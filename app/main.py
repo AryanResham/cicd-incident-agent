@@ -1,5 +1,6 @@
 """FastAPI app: the to-do JSON API (docs/API.md) plus the static page at /."""
 
+import os
 import re
 import sqlite3
 from contextlib import asynccontextmanager
@@ -125,7 +126,9 @@ def index():
 
 @router.get("/health")
 def health():
-    return {"status": "ok"}
+    # APP_VERSION is the commit SHA baked into the Docker image, so the pipeline can tell
+    # whether the new version is actually live (Render keeps the old one if a deploy fails).
+    return {"status": "ok", "version": os.getenv("APP_VERSION", "dev")}
 
 
 @router.get("/api/todos", response_model=list[Todo])

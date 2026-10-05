@@ -14,7 +14,7 @@ class FakeTodoApp:
     """
 
     def __init__(self, *, health_status=200, page_status=200, done_works=True, create_status=201,
-                 delay=0.0, down=False):
+                 delay=0.0, down=False, version="dev"):
         self.todos: dict[int, dict] = {}
         self.next_id = 1
         self.health_status = health_status
@@ -23,6 +23,8 @@ class FakeTodoApp:
         self.create_status = create_status
         self.delay = delay
         self.down = down
+        self.version = version  # what /health reports (the image's APP_VERSION)
+        self.health_body: dict | None = None  # overrides the /health body
         self.calls: list[str] = []
 
     def transport(self) -> httpx.MockTransport:
@@ -37,7 +39,8 @@ class FakeTodoApp:
             import time
             time.sleep(self.delay)
         if path == "/health":
-            return httpx.Response(self.health_status, json={"status": "ok"})
+            body = self.health_body if self.health_body is not None else {"status": "ok", "version": self.version}
+            return httpx.Response(self.health_status, json=body)
         if path == "/":
             return httpx.Response(self.page_status, html="<html><body>To-Do</body></html>")
         if path == "/api/todos" and method == "GET":

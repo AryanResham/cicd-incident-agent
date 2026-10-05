@@ -96,11 +96,12 @@ class _Round:
             self.add("GET /health", False, err, None, elapsed)
             return
         try:
-            body_ok = resp.json() == {"status": "ok"}
+            body = resp.json()
+            body_ok = isinstance(body, dict) and body.get("status") == "ok"  # extra fields (version) are fine
         except ValueError:
             body_ok = False
         ok = resp.status_code == 200 and body_ok
-        self.add("GET /health", ok, "" if ok else f"expected 200 {{'status': 'ok'}}, got: {_short(resp.text)}",
+        self.add("GET /health", ok, "" if ok else f"expected 200 with status 'ok', got: {_short(resp.text)}",
                  resp, elapsed)
 
     def check_page(self) -> None:
