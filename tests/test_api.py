@@ -19,10 +19,16 @@ def add(client, title="Task", due_date=None):
 
 # ---------- health + seed through the API ----------
 
-def test_health(client):
+def test_health(client, monkeypatch):
+    monkeypatch.delenv("APP_VERSION", raising=False)
     response = client.get("/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    assert response.json() == {"status": "ok", "version": "dev"}
+
+
+def test_health_reports_app_version(client, monkeypatch):
+    monkeypatch.setenv("APP_VERSION", "abc1234")
+    assert client.get("/health").json() == {"status": "ok", "version": "abc1234"}
 
 
 def test_seeded_list_is_sorted_by_status(client):

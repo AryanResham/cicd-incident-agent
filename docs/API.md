@@ -43,7 +43,7 @@ Don't change it without updating every consumer.
 | Method | Path | Request | Success | Errors |
 |---|---|---|---|---|
 | GET | `/` | – | `200` HTML (`app/static/index.html`) | |
-| GET | `/health` | – | `200` `{"status": "ok"}` | |
+| GET | `/health` | – | `200` `{"status": "ok", "version": "<APP_VERSION>"}` | |
 | GET | `/api/todos` | – | `200` `Todo[]`, sorted (see below) | |
 | GET | `/api/todos/summary` | – | `200` `{"overdue": n, "due_soon": n, "open": n, "done": n}` | |
 | GET | `/api/todos/{id}` | – | `200` `Todo` | `404` |
@@ -68,6 +68,9 @@ Don't change it without updating every consumer.
 | `DATABASE_PATH` | `./todos.db` | SQLite file |
 | `APP_TIMEZONE` | `Asia/Kolkata` | What "today" means |
 | `PORT` | `8000` | Container only (uvicorn `--port`) |
+| `APP_VERSION` | `dev` | Reported by `/health`. The Docker image bakes in the commit SHA (`--build-arg APP_VERSION=<sha>`), so the pipeline can check which version is live |
+
+- **`/health` consumers** must only rely on `status == "ok"`; `version` is informational (and is what `verify` and the rollback wait for).
 
 ## Seed data
 Inserted at startup **only if the table is empty**. Deadlines are relative to "today" at startup:

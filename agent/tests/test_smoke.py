@@ -37,6 +37,14 @@ def test_down_app_reports_connection_errors():
     assert "ConnectError" in report.checks[0].detail
 
 
+def test_health_only_relies_on_status_field():
+    app = FakeTodoApp(version="abc123")  # {"status": "ok", "version": ...} passes
+    assert run(app, retries=0)[0].healthy
+    app.health_body = {"status": "starting", "version": "abc123"}
+    report, _ = run(app, retries=0)
+    assert [c.name for c in report.failed] == ["GET /health"]
+
+
 def test_missing_page_fails_only_page_check():
     report, _ = run(FakeTodoApp(page_status=404), retries=0)
     assert [c.name for c in report.failed] == ["GET /"]
