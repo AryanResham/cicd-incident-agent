@@ -1,8 +1,10 @@
 from datetime import date
 
 import pytest
+from fastapi.testclient import TestClient
 
-from app import db
+from app import clock, db
+from app.main import create_app, get_today
 
 # Every test runs on this frozen "today", whatever the real date is.
 FROZEN_TODAY = date(2026, 10, 5)
@@ -23,3 +25,23 @@ def conn(db_path):
     connection = db.connect(db_path)
     yield connection
     connection.close()
+
+
+@pytest.fixture
+def client(db_path, monkeypatch):
+    """API client on a temp DB, seeded at startup, with "today" frozen."""
+    monkeypatch.setattr(clock, "today", lambda moment=None: FROZEN_TODAY)  # used by the startup seed
+    app = create_app()
+    app.dependency_overrides[get_today] = lambda: FROZEN_TODAY  # used by the routes
+    with TestClient(app) as test_client:  # "with" runs the lifespan (init DB + seed)
+        yield test_client
+
+
+@pytest.fixture
+def empty_client(client, db_path):
+    """Same as `client`, but with the seed rows removed."""
+    connection = db.connect(db_path)
+    connection.execute("DELETE FROM todos")
+    connection.commit()
+    connection.close()
+    return client

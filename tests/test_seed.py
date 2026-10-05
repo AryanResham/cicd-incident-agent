@@ -1,6 +1,9 @@
 from datetime import date
 
+from fastapi.testclient import TestClient
+
 from app import db
+from app.main import create_app, get_today
 from app.seed import seed_if_empty
 from app.status import compute_status, summarize
 
@@ -50,3 +53,12 @@ def test_seed_deadlines_follow_today(conn):
     dues = {t["title"]: t["due_date"] for t in db.list_todos(conn)}
     assert dues["Set up GitHub Actions"] == "2027-01-01"
     assert dues["Prepare demo slides"] == "2027-01-07"
+
+
+def test_app_startup_seeds_once(client):
+    # `client` already started the app once (and seeded it); start a second app on the same DB.
+    restarted = create_app()
+    restarted.dependency_overrides[get_today] = lambda: FROZEN_TODAY
+    with TestClient(restarted) as second:
+        assert len(second.get("/api/todos").json()) == 6
+        assert second.get("/api/todos/summary").json() == {"overdue": 1, "due_soon": 2, "open": 5, "done": 1}
