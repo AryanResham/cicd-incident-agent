@@ -72,6 +72,7 @@ class FailedJob:
 
 @dataclass
 class TestFailure:
+    __test__ = False  # not a pytest test class
     name: str
     message: str
     details: str
