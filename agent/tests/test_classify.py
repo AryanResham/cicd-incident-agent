@@ -101,6 +101,36 @@ def test_page_missing_from_image_is_simple():  # S9
     assert classify.classify(e).kind == SIMPLE
 
 
+def _real_verify_log(**app_flags) -> tuple[str, dict]:
+    """What the verify job really prints (agent.smoke with retries), plus its smoke.json."""
+    from agent.smoke import run_smoke
+    from agent.tests.fakes import FakeTodoApp
+    lines: list[str] = []
+    report = run_smoke("https://todo.onrender.com", transport=FakeTodoApp(**app_flags).transport(),
+                       sleep=lambda s: None, log=lines.append)
+    return "\n".join(lines + [report.summary(), "##[error]Process completed with exit code 1."]), report.to_dict()
+
+
+@pytest.mark.parametrize("with_smoke_json", [False, True])
+def test_real_verify_output_is_not_mistaken_for_a_test_failure(with_smoke_json):  # S6-S9
+    log, smoke = _real_verify_log(down=True)
+    e = ev(trigger="deploy_failure", log=log, jobs=("verify (smoke)",), smoke_failed=None,
+           changed=["Dockerfile"], diff=diff_for("Dockerfile", "-CMD a", "+CMD b"))
+    e.smoke = smoke if with_smoke_json else None
+    assert (classify.classify(e).category, classify.classify(e).kind) == ("deploy_failure", SIMPLE)
+
+
+def test_new_version_never_going_live_is_a_deploy_failure():
+    log = ("waiting for version abc1234: live is version 'old5678' (15s so far)\n"
+           "FAIL  version: new version did not go live within 600s: expected abc1234, last seen version 'old5678'\n"
+           "##[error]Process completed with exit code 1.")
+    smoke = {"checks": [{"name": "version", "ok": False, "detail": "new version did not go live"}]}
+    e = ev(trigger="deploy_failure", log=log, jobs=("verify",), smoke_failed=None, changed=["requirements.txt"],
+           diff=diff_for("requirements.txt", "-tzdata==2026.5"))
+    e.smoke = smoke
+    assert (classify.classify(e).category, classify.classify(e).kind) == ("deploy_failure", SIMPLE)
+
+
 def test_api_logic_broken_in_production_is_core():
     e = ev(trigger="deploy_failure", jobs=("verify",), smoke_failed=("round trip",), changed=["app/main.py"],
            diff=diff_for("app/main.py", "-    todo.done = body.done", "+    todo.done = False"))
