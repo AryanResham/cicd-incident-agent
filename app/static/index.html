@@ -90,6 +90,25 @@
       return span;
     }
 
+    // An empty or half-typed native date input both have value "", so catch the half-typed case.
+    function dateValue(input) {
+      if (input.validity.badInput) throw new Error('Please enter a complete date, or clear it.');
+      return input.value || null;
+    }
+
+    // Runs one change against the API, then reloads. Returns false (and shows the error) if it failed.
+    async function run(action) {
+      try {
+        await action();
+      } catch (err) {
+        showError(err.message);
+        return false;
+      }
+      showError('');
+      await load();
+      return true;
+    }
+
     async function load() {
       try {
         todos = await api('GET', '/api/todos');
@@ -112,13 +131,38 @@
       box.type = 'checkbox';
       box.checked = t.done;
       box.setAttribute('aria-label', t.done ? 'Mark as not done' : 'Mark as done');
+      box.onchange = async () => {
+        if (!(await run(() => api('PATCH', `/api/todos/${t.id}`, { done: box.checked })))) box.checked = t.done;
+      };
       const text = el('div', 'flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1');
       text.append(el('span', 'break-words' + (t.done ? ' text-gray-400 line-through' : ''), t.title));
       const b = badge(t);
       if (b) text.append(b);
-      li.append(box, text);
+      li.append(box, text, iconButton('🗑', 'Delete', () => remove(t)));
       return li;
     }
+
+    function iconButton(icon, label, onClick) {
+      const btn = el('button', 'shrink-0 rounded p-1 hover:bg-gray-100', icon);
+      btn.type = 'button';
+      btn.title = label;
+      btn.setAttribute('aria-label', label);
+      btn.onclick = onClick;
+      return btn;
+    }
+
+    function remove(t) {
+      if (confirm(`Delete "${t.title}"?`)) run(() => api('DELETE', `/api/todos/${t.id}`));
+    }
+
+    $('add-form').onsubmit = (event) => {
+      event.preventDefault();
+      run(async () => {
+        await api('POST', '/api/todos', { title: $('title').value, due_date: dateValue($('due')) });
+        event.target.reset();
+        $('title').focus();
+      });
+    };
 
     load();
   </script>
