@@ -4,8 +4,9 @@ Used by the `verify` job, the health monitor, after every rollback and by the
 fix loop's in-runner pre-checks.
 
     python -m agent.smoke --url https://my-app.onrender.com [--json out.json]
+    python -m agent.smoke --url ... --expect-version <sha> [--wait 600]   # verify job: wait for the new image first
 
-Exit code 0 = healthy, 1 = unhealthy.
+Exit code 0 = healthy, 1 = unhealthy (or, with --expect-version, the new version never went live).
 """
 
 from __future__ import annotations
@@ -25,6 +26,9 @@ REQUEST_TIMEOUT = 15.0
 LATENCY_LIMIT = 3.0  # seconds per request, after warm-up
 RETRIES = 3  # extra rounds after the first one
 BACKOFF = 5.0  # seconds; doubles every retry (5, 10, 20)
+VERSION_WAIT = 600.0  # Render can take several minutes to roll out a new image
+VERSION_POLL = 15.0
+VERSION_REQUEST_TIMEOUT = 60.0  # a sleeping free instance takes up to ~1 min to answer
 
 
 @dataclass
@@ -96,11 +100,12 @@ class _Round:
             self.add("GET /health", False, err, None, elapsed)
             return
         try:
-            body_ok = resp.json() == {"status": "ok"}
+            body = resp.json()
+            body_ok = isinstance(body, dict) and body.get("status") == "ok"  # extra fields (version) are fine
         except ValueError:
             body_ok = False
         ok = resp.status_code == 200 and body_ok
-        self.add("GET /health", ok, "" if ok else f"expected 200 {{'status': 'ok'}}, got: {_short(resp.text)}",
+        self.add("GET /health", ok, "" if ok else f"expected 200 with status 'ok', got: {_short(resp.text)}",
                  resp, elapsed)
 
     def check_page(self) -> None:
@@ -220,9 +225,57 @@ def run_smoke(
             failed = ", ".join(r.name for r in results if not r.ok)
             if attempt < retries:
                 wait = backoff * (2 ** attempt)
-                log(f"round {rounds} failed ({failed}); retrying in {wait:.0f}s")
+                # Wording matters: "<n> failed" would look like a pytest summary to agent.classify.
+                log(f"round {rounds} unhealthy ({failed}); retrying in {wait:.0f}s")
                 sleep(wait)
         return SmokeReport(base_url, False, rounds, results)
+
+
+def wait_for_version(
+    base_url: str,
+    expected: str,
+    *,
+    timeout: float = VERSION_WAIT,
+    poll_every: float = VERSION_POLL,
+    accept_missing: bool = False,
+    transport: httpx.BaseTransport | None = None,
+    sleep=time.sleep,
+    clock=time.monotonic,
+    log=print,
+) -> CheckResult:
+    """Poll /health until it reports `version == expected` (the commit SHA baked into the image).
+
+    Render keeps the old version serving while it rolls out a new image, and keeps it for good if
+    the new container never starts, so smoke checks right after the deploy hook could test the OLD
+    version. Errors and cold starts are tolerated until `timeout`.
+    `accept_missing=True` also accepts a healthy /health without a `version` field (images built
+    before the field existed), which the rollback needs for old stable images.
+    """
+    start = clock()
+    seen = "no answer yet"
+    with httpx.Client(base_url=base_url.rstrip("/"), timeout=VERSION_REQUEST_TIMEOUT, transport=transport,
+                      follow_redirects=True) as client:
+        while True:
+            version, legacy = None, False
+            try:
+                resp = client.get("/health")
+                body = resp.json() if resp.status_code == 200 else None
+                if isinstance(body, dict):
+                    version = body.get("version")
+                    legacy = "version" not in body and body.get("status") == "ok"
+                seen = f"version {version!r}" if version is not None else (
+                    "a healthy app without a version field" if legacy else f"HTTP {resp.status_code}")
+            except (httpx.HTTPError, ValueError) as exc:
+                seen = f"no answer ({type(exc).__name__})"
+            elapsed = clock() - start
+            if version == expected or (legacy and accept_missing):
+                return CheckResult("version", True, f"version {expected[:12]} is live after {elapsed:.0f}s",
+                                   200, round(elapsed, 3))
+            if elapsed + poll_every > timeout:
+                return CheckResult("version", False, f"new version did not go live within {timeout:.0f}s: "
+                                   f"expected {expected[:12]}, last seen {seen}", None, round(elapsed, 3))
+            log(f"waiting for version {expected[:7]}: live is {seen} ({elapsed:.0f}s so far)")
+            sleep(poll_every)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -231,9 +284,22 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--json", dest="json_path", help="also write the report as JSON to this file")
     parser.add_argument("--retries", type=int, default=RETRIES)
     parser.add_argument("--warmup-timeout", type=float, default=WARMUP_TIMEOUT)
+    parser.add_argument("--expect-version", help="first wait until /health reports this version (commit SHA)")
+    parser.add_argument("--wait", type=float, default=VERSION_WAIT,
+                        help="seconds to wait for --expect-version before failing (default %(default)s)")
+    parser.add_argument("--poll", type=float, default=VERSION_POLL, help="seconds between version polls")
     args = parser.parse_args(argv)
 
-    report = run_smoke(args.url, retries=args.retries, warmup_timeout=args.warmup_timeout)
+    version_check = None
+    if args.expect_version:
+        version_check = wait_for_version(args.url, args.expect_version, timeout=args.wait, poll_every=args.poll)
+        print(f"{'PASS' if version_check.ok else 'FAIL'}  version: {version_check.detail}")
+    if version_check is not None and not version_check.ok:
+        report = SmokeReport(args.url.rstrip("/"), False, 0, [version_check])  # nothing new to smoke-test
+    else:
+        report = run_smoke(args.url, retries=args.retries, warmup_timeout=args.warmup_timeout)
+        if version_check is not None:
+            report.checks.insert(0, version_check)
     print(report.summary())
     if args.json_path:
         with open(args.json_path, "w", encoding="utf-8") as fh:
