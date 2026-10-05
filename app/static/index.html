@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>To-Do</title>
+  <link rel="icon" href="data:,">
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 text-gray-900">
+  <main class="max-w-xl mx-auto px-4 py-8">
+    <header class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+      <h1 class="text-2xl font-bold">To-Do</h1>
+      <p id="summary" class="text-sm text-gray-500"></p>
+    </header>
+
+    <form id="add-form" class="mt-4 flex flex-wrap gap-2">
+      <input id="title" placeholder="New todo title" maxlength="200" aria-label="New todo title"
+             class="flex-1 min-w-0 basis-48 rounded-md border border-gray-300 px-3 py-2">
+      <input id="due" type="date" aria-label="Deadline (optional)"
+             class="rounded-md border border-gray-300 px-3 py-2">
+      <button class="rounded-md bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700">Add</button>
+    </form>
+    <p id="error" class="mt-2 text-sm text-red-600" role="alert" hidden></p>
+
+    <ul id="list" class="mt-4 divide-y divide-gray-200 rounded-lg border border-gray-200 bg-white"></ul>
+    <p id="empty" class="mt-4 py-8 text-center text-gray-500" hidden></p>
+  </main>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const BADGES = {
+      overdue: ['Overdue', 'bg-red-100 text-red-700'],
+      due_today: ['Due today', 'bg-amber-100 text-amber-800'],
+      due_tomorrow: ['Due tomorrow', 'bg-amber-100 text-amber-800'],
+      upcoming: [null, 'bg-gray-100 text-gray-600'],
+    };
+    let todos = [];
+
+    // fetch() wrapper: returns parsed JSON (or null for 204) and throws an Error with a readable message.
+    async function api(method, path, body) {
+      let res;
+      try {
+        res = await fetch(path, {
+          method,
+          headers: body ? { 'Content-Type': 'application/json' } : {},
+          body: body ? JSON.stringify(body) : undefined,
+        });
+      } catch {
+        throw new Error('Could not reach the server. Please try again.');
+      }
+      if (res.status === 204) return null;
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(errorText(data, res.status));
+      return data;
+    }
+
+    // FastAPI errors: 422 -> {"detail": [{"loc": [...], "msg": "..."}]}, 404 -> {"detail": "Todo not found"}
+    function errorText(data, status) {
+      const detail = data && data.detail;
+      if (Array.isArray(detail)) return detail.map((e) => e.msg.replace(/^Value error, /, '')).join(' · ');
+      if (typeof detail === 'string') return detail;
+      return `Something went wrong (HTTP ${status}). Please try again.`;
+    }
+
+    function showError(message) {
+      $('error').textContent = message;
+      $('error').hidden = !message;
+    }
+
+    // Small DOM helper. Text always goes in via textContent, never innerHTML.
+    function el(tag, className, text) {
+      const node = document.createElement(tag);
+      if (className) node.className = className;
+      if (text != null) node.textContent = text;
+      return node;
+    }
+
+    function formatDate(iso) {
+      const [y, m, d] = iso.split('-').map(Number);
+      return `${d} ${MONTHS[m - 1]}` + (y !== new Date().getFullYear() ? ` ${y}` : '');
+    }
+
+    function badge(t) {
+      const [label, colors] = BADGES[t.status] || [];
+      if (!colors) return null;
+      const span = el('span', `rounded-full px-2 py-0.5 text-xs font-medium ${colors}`, label || formatDate(t.due_date));
+      span.title = `Due ${t.due_date}`;
+      return span;
+    }
+
+    async function load() {
+      try {
+        todos = await api('GET', '/api/todos');
+        render();
+      } catch (err) {
+        showError(err.message);
+      }
+    }
+
+    function render() {
+      $('list').replaceChildren(...todos.map(viewRow));
+      $('list').hidden = todos.length === 0;
+      $('empty').hidden = todos.length > 0;
+      $('empty').textContent = 'Nothing here yet. Add your first todo above.';
+    }
+
+    function viewRow(t) {
+      const li = el('li', 'flex items-center gap-3 px-4 py-3');
+      const box = el('input', 'h-4 w-4 shrink-0 accent-blue-600');
+      box.type = 'checkbox';
+      box.checked = t.done;
+      box.setAttribute('aria-label', t.done ? 'Mark as not done' : 'Mark as done');
+      const text = el('div', 'flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1');
+      text.append(el('span', 'break-words' + (t.done ? ' text-gray-400 line-through' : ''), t.title));
+      const b = badge(t);
+      if (b) text.append(b);
+      li.append(box, text);
+      return li;
+    }
+
+    load();
+  </script>
+</body>
+</html>
