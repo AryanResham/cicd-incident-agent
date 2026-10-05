@@ -1,7 +1,7 @@
 {
   "id": "C8",
   "group": "core",
-  "title": "Validation removed (blank titles accepted: min_length 1 -> 0)",
+  "title": "Validation removed (blank titles accepted: the empty-title check in check_title() is deleted)",
   "caught_by": "CI (test)",
   "expected": {
     "kind": "core",
@@ -11,24 +11,27 @@
   "breaks": [
     {
       "file": "app/main.py",
-      "regex": "min_length\\s*=\\s*1\\b",
-      "replace": "min_length=0"
+      "regex": "^[ \\t]*if not (\\w+):[ \\t]*\\n[ \\t]*raise ValueError\\([^\\n]*\\n",
+      "replace": ""
     }
   ],
   "root_cause_keywords": [
     "validation",
-    "min_length"
+    "blank",
+    "empty",
+    "check_title"
   ],
   "simulated": {
     "trigger": "ci_failure",
     "failed_jobs": [
       {
         "name": "test",
-        "log": "FAILED tests/test_validation.py::test_blank_title - assert 201 == 422"
+        "log": "FAILED tests/test_api.py::test_create_rejects_invalid_body[body0] - assert 201 == 422\nFAILED tests/test_integration.py::test_title_errors_are_readable_on_the_page - assert 201 == 422\n2 failed, 290 passed"
       }
     ],
     "junit": [
-      "tests.test_validation::test_blank_title"
+      "tests.test_api::test_create_rejects_invalid_body[body0]",
+      "tests.test_integration::test_title_errors_are_readable_on_the_page"
     ]
   },
   "demo": false

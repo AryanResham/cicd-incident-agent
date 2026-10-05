@@ -1,7 +1,7 @@
 {
   "id": "S9",
   "group": "simple",
-  "title": "index.html not copied into the image (`app/static/` added to .dockerignore)",
+  "title": "index.html not copied into the image (`app/static/` added to .dockerignore): GET / fails live",
   "caught_by": "verify (smoke: GET / 404)",
   "expected": {
     "kind": "simple",

@@ -2,7 +2,7 @@
   "id": "S6",
   "demo": true,
   "group": "simple",
-  "title": "Wrong port in the Dockerfile CMD (tests pass, container listens on 9999)",
+  "title": "Dockerfile CMD binds the wrong host/port (127.0.0.1:9999): tests pass, the app is unreachable once deployed",
   "caught_by": "verify (smoke checks)",
   "expected": {
     "kind": "simple",
@@ -12,12 +12,14 @@
   "breaks": [
     {
       "file": "Dockerfile",
-      "regex": "(CMD[^\\n]*?)\\$\\{?PORT(?::-?\\d+)?\\}?",
-      "replace": "\\g<1>9999"
+      "regex": "^(CMD[^\\n]*?--host\\s+)0\\.0\\.0\\.0(\\s+--port\\s+)\\$\\{?PORT(?::-?\\d+)?\\}?",
+      "replace": "\\g<1>127.0.0.1\\g<2>9999"
     }
   ],
   "root_cause_keywords": [
     "port",
+    "host",
+    "127.0.0.1",
     "Dockerfile"
   ],
   "simulated": {
@@ -25,7 +27,7 @@
     "failed_jobs": [
       {
         "name": "verify",
-        "log": ""
+        "log": "Smoke checks for https://todo.onrender.com: UNHEALTHY (after 0 round(s))\n  FAIL  version 600.00s  new version did not go live within 600s: expected 3f2a9c1d0b7e, last seen version '9b1c7e2a4d10'\n##[error]Process completed with exit code 1."
       }
     ],
     "smoke_failed": [
@@ -37,6 +39,6 @@
     "changed_files": [
       "Dockerfile"
     ],
-    "diff": "--- Dockerfile (modified)\n@@ -12 +12 @@\n-CMD [\"sh\", \"-c\", \"uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}\"]\n+CMD [\"sh\", \"-c\", \"uvicorn app.main:app --host 0.0.0.0 --port 9999\"]"
+    "diff": "--- Dockerfile (modified)\n@@ -43 +43 @@\n-CMD exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}\n+CMD exec uvicorn app.main:app --host 127.0.0.1 --port 9999"
   }
 }

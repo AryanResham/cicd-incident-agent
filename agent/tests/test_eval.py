@@ -14,6 +14,13 @@ from pydantic import BaseModel, Field
 app = FastAPI(title="To-Do")
 
 
+def check_title(value: str) -> str:
+    value = value.strip()
+    if not value:
+        raise ValueError("Title can't be empty")
+    return value
+
+
 class TodoCreate(BaseModel):
     title: str = Field(min_length=1, max_length=200)
 
@@ -60,7 +67,8 @@ def delete(conn, todo_id):
 ''',
     "requirements.txt": "fastapi==0.142.2\nuvicorn==0.54.0\ntzdata==2026.5\n",
     "Dockerfile": 'FROM python:3.12-slim\nWORKDIR /srv\nCOPY requirements.txt .\nRUN pip install -r requirements.txt\n'
-                  'COPY app ./app\nCMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]\n',
+                  'COPY app ./app\nCMD exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}\n'
+                  'HEALTHCHECK CMD ["python", "-c", "print(${PORT})"]\n',
     "tests/conftest.py": "import pytest\n",
 }
 
@@ -99,13 +107,61 @@ def test_every_bug_can_be_planted_in_a_typical_app(app_repo, scenario):
 def test_planted_bugs_look_right(app_repo):
     by_id = {s["id"]: s for s in ev_mod.load_scenarios()}
     ev_mod.apply_breaks(app_repo, by_id["S6"]["breaks"])
-    assert "--port 9999" in (app_repo / "Dockerfile").read_text()
+    dockerfile = (app_repo / "Dockerfile").read_text()
+    assert "CMD exec uvicorn app.main:app --host 127.0.0.1 --port 9999\n" in dockerfile
+    assert 'print(${PORT})' in dockerfile  # only the CMD line changes, not the HEALTHCHECK
+    ev_mod.apply_breaks(app_repo, by_id["C8"]["breaks"])
+    assert "if not value" not in (app_repo / "app/main.py").read_text()
     ev_mod.apply_breaks(app_repo, by_id["C3"]["breaks"])
     assert 'return "done"' not in (app_repo / "app/status.py").read_text()
     ev_mod.apply_breaks(app_repo, by_id["C5"]["breaks"])
     assert "(todo_id + 1,)" in (app_repo / "app/db.py").read_text()
     ev_mod.apply_breaks(app_repo, by_id["S7"]["breaks"])
     assert 'DATABASE_PATH = os.environ["DATABASE_PATH"]' in (app_repo / "app/db.py").read_text()
+
+
+@pytest.mark.parametrize("scenario", [s for s in ev_mod.load_scenarios() if s["breaks"]], ids=lambda s: s["id"])
+def test_every_bug_applies_to_the_real_app(scenario):
+    """If the app, Dockerfile or requirements change shape, re-base the scenario (see scenarios/README.md)."""
+    assert ev_mod.break_status(scenario, ev_mod.ROOT) == "applies"
+
+
+def stage_prechecks(stage, ok=False, docker=True):
+    calls = []
+
+    def fake(work, changes, tag="", log=print):
+        calls.append(changes)
+        notes = [] if docker else ["Docker is not available here: docker build and container smoke checks "
+                                   "were skipped"]
+        return fix.PrecheckResult(ok, stage, "" if ok else "boom\nE   the last line\n", notes)
+    return fake, calls
+
+
+@pytest.mark.parametrize("sid, stage, ok, docker, got, row_ok", [
+    ("C1", 1, False, True, "test", True),       # CI (test) bug fails pytest
+    ("C1", 4, True, True, "passes", False),     # ... and must not slip through
+    ("S5", 2, False, True, "build", True),      # CI (build) bug: pytest passes, docker build fails
+    ("S6", 3, False, True, "deploy", True),     # deploy-only bug: only the container smoke checks fail
+    ("S6", 1, False, True, "test", False),      # a deploy-only bug that fails pytest is mis-designed
+    ("S6", 2, True, False, "passes", True),     # no Docker: pytest passing is all we can check
+    ("S6", 1, False, False, "test", False),
+])
+def test_plant_check_compares_where_the_bug_is_caught(app_repo, sid, stage, ok, docker, got, row_ok):
+    s = next(s for s in ev_mod.load_scenarios() if s["id"] == sid)
+    fake, calls = stage_prechecks(stage, ok, docker)
+    row = ev_mod.plant_check(s, repo_root=app_repo, prechecks=fake, log=lambda *_: None)
+    assert (row["got"], row["ok"]) == (got, row_ok)
+    assert calls == [{}]  # never pip-installs the planted requirements
+    assert row["checked"] == ("pytest" if got == "test" else "pytest + docker" if docker
+                              else "pytest only (no Docker)")
+
+
+def test_plant_check_reports_manual_and_rebase(app_repo):
+    by_id = {s["id"]: s for s in ev_mod.load_scenarios()}
+    assert ev_mod.plant_check(by_id["N1"], repo_root=app_repo)["ok"] is None
+    s = dict(by_id["S1"], breaks=[{"file": "app/main.py", "regex": "zzz", "replace": ""}])
+    row = ev_mod.plant_check(s, repo_root=app_repo)
+    assert (row["got"], row["ok"]) == ("needs re-base", False)
 
 
 def test_break_that_does_not_match_needs_rebase(app_repo):
