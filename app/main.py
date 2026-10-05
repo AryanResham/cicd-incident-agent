@@ -1,3 +1,4 @@
+import humanize  # scenario S1: used for friendly dates
 """FastAPI app: the to-do JSON API (docs/API.md) plus the static page at /."""
 
 import os
