@@ -3,6 +3,7 @@
     python -m agent.eval --dry-run              # no Gemini: classification + freeze + "does the bug still apply?"
     python -m agent.eval --plant-check          # no Gemini: plant each bug, check it fails where it should
                                                 # (pytest; docker build + container smoke when Docker exists)
+    python -m agent.eval --plant S6             # live demo: apply one scenario's bug to this checkout
     python -m agent.eval --only S1,C1 --rpm 4   # real: plant the bug in a scratch copy, run the pre-check path
                                                 # (pytest, docker when available), Gemini diagnosis + fix loop
 
@@ -194,6 +195,22 @@ def plant_check(s: dict, repo_root: Path = ROOT, prechecks=run_prechecks, log=pr
     return row
 
 
+def plant(scenario_id: str, repo_root: Path = ROOT) -> int:
+    """Apply one scenario's bug to a real checkout, for the live demo (then commit + push to main)."""
+    found = load_scenarios(only=[scenario_id])
+    if not found or not found[0].get("breaks"):
+        print(f"{scenario_id}: unknown or manual scenario" + (f" ({found[0].get('manual')})" if found else ""))
+        return 1
+    try:
+        changes = apply_breaks(repo_root, found[0]["breaks"])
+    except BreakError as exc:
+        print(f"{scenario_id}: cannot plant ({exc}); is it already planted?")
+        return 1
+    print(evidence_diff(changes))
+    print(f"\nplanted {found[0]['id']} ({found[0]['title']}) in: {', '.join(changes)}")
+    return 0
+
+
 # ---- real run --------------------------------------------------------------------------------
 class LocalGitHub:
     """Records what the fix loop would do on GitHub (branches, PRs, auto-merge) without any network."""
@@ -316,11 +333,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dry-run", action="store_true", help="no Gemini: classification + freeze only")
     parser.add_argument("--plant-check", action="store_true",
                         help="no Gemini: plant each bug and check it fails where expected (pytest, docker)")
+    parser.add_argument("--plant", metavar="ID", help="apply one scenario's bug to this checkout (live demo)")
+    parser.add_argument("--repo-root", default=str(ROOT), help=argparse.SUPPRESS)
     parser.add_argument("--only", help="comma-separated scenario ids, e.g. S1,C1")
     parser.add_argument("--rpm", type=float, default=4.0, help="Gemini requests per minute (free tier: keep low)")
     parser.add_argument("--max-calls", type=int, default=40, help="stop before using more Gemini calls than this")
     parser.add_argument("--out", help="output path without extension (default scenarios/results[-dry-run])")
     args = parser.parse_args(argv)
+
+    if args.plant:
+        return plant(args.plant, Path(args.repo_root))
 
     scenarios = load_scenarios(only=args.only.split(",") if args.only else None)
     if not scenarios:

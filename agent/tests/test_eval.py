@@ -1,4 +1,5 @@
 import json
+import shutil
 
 import pytest
 
@@ -166,6 +167,26 @@ def test_plant_check_reports_manual_and_rebase(app_repo):
     s = dict(by_id["S1"], breaks=[{"file": "app/main.py", "regex": "zzz", "replace": ""}])
     row = ev_mod.plant_check(s, repo_root=app_repo)
     assert (row["got"], row["ok"]) == ("needs re-base", False)
+
+
+def test_e1_easy_fix_is_never_simple(tmp_path):
+    """E1: dropping the private SDK means removing a call from create_todo() -> CORE, never auto-merged."""
+    from agent.classify import CORE, patch_kind
+    work = tmp_path / "repo"
+    shutil.copytree(ev_mod.ROOT, work, ignore=fix.COPY_IGNORE)
+    e1 = next(s for s in ev_mod.load_scenarios() if s["id"] == "E1")
+    planted = ev_mod.apply_breaks(work, e1["breaks"])
+    assert 'audit_log("todo created"' in planted["app/main.py"][1]
+    undo = {path: (new, old) for path, (old, new) in planted.items()}  # the "easy" fix: delete it all again
+    assert patch_kind(undo)[0] == CORE
+
+
+def test_plant_cli_applies_one_scenario(app_repo, capsys):
+    assert ev_mod.main(["--plant", "S6", "--repo-root", str(app_repo)]) == 0
+    assert "--host 127.0.0.1 --port 9999" in (app_repo / "Dockerfile").read_text()
+    assert "planted S6" in capsys.readouterr().out
+    assert ev_mod.main(["--plant", "S6", "--repo-root", str(app_repo)]) == 1  # already planted
+    assert ev_mod.main(["--plant", "N1", "--repo-root", str(app_repo)]) == 1  # manual
 
 
 def test_break_that_does_not_match_needs_rebase(app_repo):
