@@ -14,7 +14,7 @@ from dataclasses import dataclass
 import httpx
 
 from agent.github_api import GitHub
-from agent.smoke import SmokeReport, run_smoke
+from agent.smoke import SmokeReport, run_smoke, wait_for_version
 
 VERIFY_JOB = "verify"
 MAX_WAIT = 600.0  # give Render up to 10 minutes to roll the old image out
@@ -76,13 +76,15 @@ def rollback(
     broken_sha: str | None = None,
     http: httpx.Client | None = None,
     smoke_fn=run_smoke,
+    version_fn=wait_for_version,
     max_wait: float = MAX_WAIT,
     poll_every: float = POLL_EVERY,
     sleep=time.sleep,
     clock=time.monotonic,
     log=print,
 ) -> RollbackResult:
-    """Redeploy the last stable image and wait until the smoke checks pass. Tried once only."""
+    """Redeploy the last stable image, wait until /health reports its SHA, then until the smoke
+    checks pass. Tried once only."""
     start = clock()
 
     def done(ok: bool, reason: str, **extra) -> RollbackResult:
@@ -107,9 +109,16 @@ def rollback(
         # Never echo the hook URL: it contains Render's secret key.
         return done(False, f"Render deploy hook call failed ({type(exc).__name__})", stable_sha=stable, image=image)
 
-    report = None
+    # Wait until Render actually serves the stable image (its /health reports that SHA), so the
+    # smoke checks below test the rolled-back version and not whatever was live before.
+    version = version_fn(app_url, stable, timeout=max_wait, poll_every=poll_every, accept_missing=True,
+                         sleep=sleep, clock=clock, log=log)
+    if not version.ok:
+        return done(False, f"rollback to {stable[:7]} did not go live: {version.detail}",
+                    stable_sha=stable, image=image)
+    log(f"rollback: {version.detail}")
+
     while True:
-        sleep(poll_every)  # give Render time to swap the image before checking
         report = smoke_fn(app_url, retries=1, log=log)
         if report.healthy:
             return done(True, f"stable version {stable[:7]} is live and healthy",
@@ -118,3 +127,4 @@ def rollback(
             return done(False, f"rollback to {stable[:7]} did not pass the smoke checks within {max_wait:.0f}s",
                         stable_sha=stable, image=image, smoke=report)
         log("rollback: not healthy yet, waiting")
+        sleep(poll_every)
