@@ -1,11 +1,14 @@
 """Evaluation harness (PLAN §C): runs the failure scenarios in scenarios/*.json locally.
 
     python -m agent.eval --dry-run              # no Gemini: classification + freeze + "does the bug still apply?"
+    python -m agent.eval --plant-check          # no Gemini: plant each bug, check it fails where it should
+                                                # (pytest; docker build + container smoke when Docker exists)
+    python -m agent.eval --plant S6             # live demo: apply one scenario's bug to this checkout
     python -m agent.eval --only S1,C1 --rpm 4   # real: plant the bug in a scratch copy, run the pre-check path
                                                 # (pytest, docker when available), Gemini diagnosis + fix loop
 
 Nothing touches GitHub or Render: PRs are recorded by a local stand-in.
-Results go to scenarios/results[-dry-run].md and .json.
+Results go to scenarios/results[-dry-run|-plant-check].md and .json (git-ignored).
 """
 
 from __future__ import annotations
@@ -146,6 +149,68 @@ def dry_run(s: dict, repo_root: Path = ROOT) -> dict:
     return row
 
 
+# ---- plant check (no Gemini) -----------------------------------------------------------------
+def expected_stage(s: dict) -> str:
+    """Where the scenario's bug must be caught: 'test' (pytest), 'build' (docker build) or 'deploy'."""
+    caught = s.get("caught_by", "").lower()
+    if caught.startswith("ci (test"):
+        return "test"
+    if caught.startswith("ci (build"):
+        return "build"
+    return "deploy"
+
+
+def plant_check(s: dict, repo_root: Path = ROOT, prechecks=run_prechecks, log=print) -> dict:
+    """Plant the bug in a scratch copy and check it fails exactly where the scenario says.
+
+    CI (test) bugs must fail pytest; CI (build) bugs must pass pytest and fail `docker build`;
+    deploy-only bugs must pass pytest and the build, and fail the container smoke checks.
+    Without Docker only the pytest part can be checked (the row says so).
+    """
+    row = {"id": s["id"], "group": s["group"], "caught_by": s.get("caught_by", "-"), "expected": expected_stage(s)}
+    if not s.get("breaks"):
+        row.update(expected="-", got="-", ok=None, checked="-", detail="manual: " + s.get("manual", "see README"))
+        return row
+    with tempfile.TemporaryDirectory(prefix=f"plant-{s['id']}-") as tmp:
+        work = Path(tmp) / "repo"
+        shutil.copytree(repo_root, work, ignore=COPY_IGNORE)
+        try:
+            apply_breaks(work, s["breaks"])
+        except BreakError as exc:
+            row.update(got="needs re-base", ok=False, checked="-", detail=str(exc))
+            return row
+        # No changed paths: never pip-install a planted requirements file into this environment.
+        result = prechecks(work, {}, tag=f"plant-{s['id'].lower()}", log=log)
+
+    docker = not any("Docker is not available" in n for n in result.notes)
+    got = ("passes" if result.ok else "test" if result.stage <= 1 else "build" if result.stage == 2 else "deploy")
+    last = [line for line in result.log.splitlines() if line.strip()]
+    row.update(got=got, checked="pytest" if got == "test" else "pytest + docker" if docker
+               else "pytest only (no Docker)", detail=last[-1][:160] if last else "")
+    if docker or row["expected"] == "test":
+        row["ok"] = got == row["expected"]
+    else:  # build/deploy bugs must at least pass the tests (that's what lets them through CI)
+        row["ok"] = got == "passes"
+        row["detail"] = f"pytest passes as designed; Docker is needed to confirm the {row['expected']} failure"
+    return row
+
+
+def plant(scenario_id: str, repo_root: Path = ROOT) -> int:
+    """Apply one scenario's bug to a real checkout, for the live demo (then commit + push to main)."""
+    found = load_scenarios(only=[scenario_id])
+    if not found or not found[0].get("breaks"):
+        print(f"{scenario_id}: unknown or manual scenario" + (f" ({found[0].get('manual')})" if found else ""))
+        return 1
+    try:
+        changes = apply_breaks(repo_root, found[0]["breaks"])
+    except BreakError as exc:
+        print(f"{scenario_id}: cannot plant ({exc}); is it already planted?")
+        return 1
+    print(evidence_diff(changes))
+    print(f"\nplanted {found[0]['id']} ({found[0]['title']}) in: {', '.join(changes)}")
+    return 0
+
+
 # ---- real run --------------------------------------------------------------------------------
 class LocalGitHub:
     """Records what the fix loop would do on GitHub (branches, PRs, auto-merge) without any network."""
@@ -266,20 +331,35 @@ def summary(rows: list[dict], key: str) -> str:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run the failure scenarios locally.")
     parser.add_argument("--dry-run", action="store_true", help="no Gemini: classification + freeze only")
+    parser.add_argument("--plant-check", action="store_true",
+                        help="no Gemini: plant each bug and check it fails where expected (pytest, docker)")
+    parser.add_argument("--plant", metavar="ID", help="apply one scenario's bug to this checkout (live demo)")
+    parser.add_argument("--repo-root", default=str(ROOT), help=argparse.SUPPRESS)
     parser.add_argument("--only", help="comma-separated scenario ids, e.g. S1,C1")
     parser.add_argument("--rpm", type=float, default=4.0, help="Gemini requests per minute (free tier: keep low)")
     parser.add_argument("--max-calls", type=int, default=40, help="stop before using more Gemini calls than this")
     parser.add_argument("--out", help="output path without extension (default scenarios/results[-dry-run])")
     args = parser.parse_args(argv)
 
+    if args.plant:
+        return plant(args.plant, Path(args.repo_root))
+
     scenarios = load_scenarios(only=args.only.split(",") if args.only else None)
     if not scenarios:
         print("no scenarios selected")
         return 1
-    out = Path(args.out) if args.out else SCENARIO_DIR / ("results-dry-run" if args.dry_run else "results")
+    default = "results-dry-run" if args.dry_run else "results-plant-check" if args.plant_check else "results"
+    out = Path(args.out) if args.out else SCENARIO_DIR / default
 
     rows = []
-    if args.dry_run:
+    if args.plant_check:
+        for s in scenarios:
+            print(f"=== {s['id']}: {s['title']}")
+            rows.append(plant_check(s, log=lambda *_: None))
+        columns = ["id", "group", "caught_by", "expected", "got", "ok", "checked", "detail"]
+        text = to_markdown(rows, columns, "Scenario plant check (no Gemini: does each bug fail where it should?)")
+        text += f"\n{summary(rows, 'ok')}\n"
+    elif args.dry_run:
         for s in scenarios:
             rows.append(dry_run(s))
         columns = ["id", "group", "expected", "got", "expected_category", "category", "correct", "bug", "detail"]

@@ -1,0 +1,28 @@
+# The image only needs requirements.txt and app/ (see Dockerfile). Keep the build context small
+# and never send local data, secrets or the git history to the Docker daemon.
+.git
+.github
+.gitignore
+.claude
+.venv
+venv
+.env
+.env.*
+**/__pycache__
+**/*.py[cod]
+.pytest_cache
+*.db
+*.db-journal
+data/
+tests/
+agent/
+scenarios/
+docs/
+*.md
+junit.xml
+smoke.json
+pytest.ini
+requirements-dev.txt
+requirements-agent.txt
+Dockerfile
+.dockerignore

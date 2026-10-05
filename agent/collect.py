@@ -7,6 +7,7 @@ through `Masker` first, so secrets never end up in a prompt or an issue.
 from __future__ import annotations
 
 import io
+import json
 import os
 import re
 import xml.etree.ElementTree as ET
@@ -20,6 +21,7 @@ LOG_TAIL_LINES = 300
 DIFF_LIMIT = 15_000
 FILE_LIMIT = 12_000
 JUNIT_ARTIFACT = "junit-results"
+SMOKE_ARTIFACT = "smoke-report"  # verify job of ci-cd.yml (and the health monitor) upload smoke.json under this
 SECRET_ENV_VARS = ("GITHUB_TOKEN", "AGENT_TOKEN", "GEMINI_API_KEY", "RENDER_DEPLOY_HOOK_URL", "RENDER_API_KEY")
 ALWAYS_INCLUDE = ("requirements.txt", "Dockerfile")
 
@@ -169,6 +171,18 @@ def junit_from_zip(data: bytes) -> list[TestFailure]:
     return []
 
 
+def smoke_from_zip(data: bytes, masker: Masker) -> dict | None:
+    """The smoke report (agent.smoke --json) uploaded by the verify job, with masked details."""
+    with zipfile.ZipFile(io.BytesIO(data)) as zf:
+        for name in zf.namelist():
+            if name.endswith(".json"):
+                report = json.loads(zf.read(name).decode("utf-8", "replace"))
+                for check in report.get("checks", []):
+                    check["detail"] = masker(str(check.get("detail", "")))
+                return report
+    return None
+
+
 # ---- files -----------------------------------------------------------------
 ROOT_FILES = re.compile(r"Dockerfile|\.dockerignore|requirements[\w-]*\.txt")
 PATH_IN_TEXT = re.compile(r"(?<![\w.-])((?:app|tests)/[\w./-]+\.(?:py|html|txt|json|toml|ini|cfg))")
@@ -227,6 +241,8 @@ def collect(
             for art in gh.list_artifacts(run["id"]):
                 if art["name"] == JUNIT_ARTIFACT:
                     ev.junit_failures = junit_from_zip(gh.download_artifact(art["id"]))
+                elif art["name"] == SMOKE_ARTIFACT and ev.smoke is None:  # written by the verify job
+                    ev.smoke = smoke_from_zip(gh.download_artifact(art["id"]), masker)
             for t in ev.junit_failures:
                 t.message, t.details = masker(t.message), masker(t.details)
         except Exception as exc:
