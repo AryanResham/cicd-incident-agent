@@ -65,7 +65,7 @@ Don't change it without updating every consumer.
 
 | Var | Default | Used for |
 |---|---|---|
-| `DATABASE_PATH` | `./todos.db` | SQLite file |
+| `DATABASE_PATH` | `./todos.db` | SQLite file (in the container the process runs in `/app/data`, so `/app/data/todos.db`) |
 | `APP_TIMEZONE` | `Asia/Kolkata` | What "today" means |
 | `PORT` | `8000` | Container only (uvicorn `--port`) |
 | `APP_VERSION` | `dev` | Reported by `/health`. The Docker image bakes in the commit SHA (`--build-arg APP_VERSION=<sha>`), so the pipeline can check which version is live |
