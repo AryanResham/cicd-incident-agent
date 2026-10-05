@@ -197,6 +197,7 @@ class Agent:
             except LLMUnavailable as exc:
                 state["llm_calls"] = state.get("llm_calls", 0) + getattr(llm, "calls", 0)
                 state["actions"].append("diagnosis pending (Gemini unavailable)")
+                state["diagnosis_pending"] = True  # a re-run of the same failure resumes this incident
                 self.say(number, state, f"**Diagnosis pending** (Gemini unavailable: {exc}). The stable version "
                          "is still live. Re-run this incident later with the `workflow_dispatch` of the "
                          "incident agent workflow.", labels=[LABEL_NEEDS_HUMAN])
@@ -229,6 +230,11 @@ class Agent:
         state = report.read_state(incident.get("body")) or {"actions": [], "timeline": []}
         state.setdefault("actions", [])
         production = trigger == "deploy_failure"
+
+        # The same failure handled again (workflow_dispatch) after Gemini was unavailable: resume it.
+        pending = state.get("diagnosis_pending", "diagnosis pending (Gemini unavailable)" in state["actions"])
+        if pending and state.get("broken_sha") == sha:
+            return self.resume_pending(number, state, run)
 
         if not production and fix_pr is None:
             self.say(number, state, f"CI also failed on `{sha[:7]}` ([run]({run.get('html_url')})) while this "
@@ -266,6 +272,16 @@ class Agent:
         error = f"Attempt {used} (PR #{fix_pr['number']}) {what}:\n{ev.failure_text()[-3000:]}"
         return self.diagnose_and_fix(number, state, ev, cls, start_attempt=used + 1, previous_errors=[error],
                                      diagnosis=diagnosis)
+
+    def resume_pending(self, number: int, state: dict, run: dict) -> int:
+        """Retry the diagnosis of an incident that stopped at 'diagnosis pending'."""
+        state["diagnosis_pending"] = False
+        self.gh.remove_label(number, LABEL_NEEDS_HUMAN)
+        ev = self.collect_fn(self.gh, trigger=state.get("trigger", "ci_failure"), run=run,
+                             stable_sha=state.get("stable_sha"), repo_root=self.repo_root, masker=self.masker)
+        cls = classify(ev)
+        self.say(number, state, f"Retrying the pending diagnosis for `{run['head_sha'][:7]}`.")
+        return self.diagnose_and_fix(number, state, ev, cls)
 
     # ---- success paths ---------------------------------------------------------------------
     def handle_verify_success(self, run_id: str) -> int:
