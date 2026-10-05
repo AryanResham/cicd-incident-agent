@@ -1,0 +1,122 @@
+# Incident agent: wakes up when the "CI/CD" pipeline finishes on main.
+#   failure -> rollback if production is broken, diagnose, fix or hand over (agent.main)
+#   success -> if the verified commit is an agent fix, close the incident (lifts the deploy freeze)
+# Runs on agent/* branches are skipped (loop guard); the agent's own PR checks never open incidents.
+name: Incident Agent
+
+on:
+  workflow_run:
+    workflows: ["CI/CD"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "CI/CD run id to (re)handle, e.g. after 'diagnosis pending'"
+        required: true
+      trigger:
+        description: "auto = decide from the run's failed jobs"
+        type: choice
+        options: [auto, ci_failure, deploy_failure, verify_success]
+        default: auto
+
+permissions:
+  contents: write       # create agent/fix-* branches and commits (never main)
+  pull-requests: write  # open fix PRs, enable auto-merge
+  issues: write         # incident issues, comments, labels
+  actions: write        # read runs/logs/artifacts, re-run flaky jobs
+
+env:
+  RUN_ID: ${{ github.event.workflow_run.id || inputs.run_id }}
+
+jobs:
+  respond:
+    # Failures on main only (agent/* branches and pull requests are skipped).
+    if: >-
+      vars.AGENT_ENABLED != 'false' && (
+        (github.event_name == 'workflow_dispatch' && inputs.trigger != 'verify_success') ||
+        (github.event_name == 'workflow_run' &&
+         github.event.workflow_run.conclusion == 'failure' &&
+         github.event.workflow_run.head_branch == 'main' &&
+         github.event.workflow_run.event != 'pull_request')
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    # One incident at a time: two triggers never fight over production.
+    concurrency:
+      group: incident-agent
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GITHUB_TOKEN: ${{ github.token }}
+      AGENT_TOKEN: ${{ secrets.AGENT_TOKEN }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      AGENT_MODEL: ${{ vars.AGENT_MODEL }}
+      AGENT_LLM_RPM: ${{ vars.AGENT_LLM_RPM }}
+      RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+      RENDER_APP_URL: ${{ vars.RENDER_APP_URL }}
+      AGENT_ENABLED: ${{ vars.AGENT_ENABLED }}
+      AGENT_AUTO_MERGE: ${{ vars.AGENT_AUTO_MERGE }}
+      AGENT_ROLLBACK: ${{ vars.AGENT_ROLLBACK }}
+      INPUT_TRIGGER: ${{ inputs.trigger }}
+    steps:
+      - name: Check out main (fix branches start from here)
+        uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install agent + app test dependencies (pre-checks run the app's tests)
+        run: pip install -r requirements-agent.txt -r requirements-dev.txt
+
+      - name: Decide trigger (which job failed?)
+        id: kind
+        run: |
+          if [ -n "$INPUT_TRIGGER" ] && [ "$INPUT_TRIGGER" != "auto" ]; then
+            echo "trigger=$INPUT_TRIGGER" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          failed=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/jobs" \
+            --jq '[.jobs[] | select(.conclusion == "failure" or .conclusion == "timed_out") | .name] | join(",")')
+          echo "Failed jobs: ${failed:-none}"
+          if [ -z "$failed" ]; then
+            echo "trigger=none" >> "$GITHUB_OUTPUT"
+          elif echo "$failed" | grep -qiE 'deploy|verify'; then
+            echo "trigger=deploy_failure" >> "$GITHUB_OUTPUT"
+          else
+            echo "trigger=ci_failure" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run incident agent
+        if: steps.kind.outputs.trigger != 'none'
+        run: python -m agent.main --trigger "${{ steps.kind.outputs.trigger }}" --run-id "$RUN_ID"
+
+  close:
+    # A green run on main: if it deployed + verified an agent fix, close the incident.
+    # Separate job without the concurrency group so it is never dropped while the agent is busy.
+    if: >-
+      (github.event_name == 'workflow_dispatch' && inputs.trigger == 'verify_success') ||
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.event != 'pull_request')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+      AGENT_TOKEN: ${{ secrets.AGENT_TOKEN }}
+      AGENT_ENABLED: ${{ vars.AGENT_ENABLED }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements-agent.txt
+      - name: Close the incident if this run verified an agent fix
+        run: python -m agent.main --trigger verify_success --run-id "$RUN_ID"

@@ -1,0 +1,42 @@
+{
+  "id": "S6",
+  "demo": true,
+  "group": "simple",
+  "title": "Wrong port in the Dockerfile CMD (tests pass, container listens on 9999)",
+  "caught_by": "verify (smoke checks)",
+  "expected": {
+    "kind": "simple",
+    "category": "deploy_failure",
+    "path": "rollback -> auto-fix"
+  },
+  "breaks": [
+    {
+      "file": "Dockerfile",
+      "regex": "(CMD[^\\n]*?)\\$\\{?PORT(?::-?\\d+)?\\}?",
+      "replace": "\\g<1>9999"
+    }
+  ],
+  "root_cause_keywords": [
+    "port",
+    "Dockerfile"
+  ],
+  "simulated": {
+    "trigger": "deploy_failure",
+    "failed_jobs": [
+      {
+        "name": "verify",
+        "log": ""
+      }
+    ],
+    "smoke_failed": [
+      "GET /health",
+      "GET /",
+      "GET /api/todos",
+      "round trip"
+    ],
+    "changed_files": [
+      "Dockerfile"
+    ],
+    "diff": "--- Dockerfile (modified)\n@@ -12 +12 @@\n-CMD [\"sh\", \"-c\", \"uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}\"]\n+CMD [\"sh\", \"-c\", \"uvicorn app.main:app --host 0.0.0.0 --port 9999\"]"
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "id": "S1",
+  "demo": true,
+  "group": "simple",
+  "title": "Code imports a package missing from requirements.txt",
+  "caught_by": "CI (test: ModuleNotFoundError)",
+  "expected": {
+    "kind": "simple",
+    "category": "dependency",
+    "path": "auto-fix"
+  },
+  "breaks": [
+    {
+      "file": "app/main.py",
+      "prepend": "import humanize  # scenario S1: used for friendly dates\n"
+    }
+  ],
+  "root_cause_keywords": [
+    "humanize",
+    "requirements"
+  ],
+  "simulated": {
+    "trigger": "ci_failure",
+    "failed_jobs": [
+      {
+        "name": "test",
+        "log": "E   ModuleNotFoundError: No module named 'humanize'\nERROR tests/test_todos.py\n!!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!"
+      }
+    ],
+    "junit": []
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "id": "S4",
+  "group": "simple",
+  "title": "Typo in a variable name -> NameError (`due_date` -> `due_dte` before `< today`)",
+  "caught_by": "CI (test: NameError)",
+  "expected": {
+    "kind": "simple",
+    "category": "code_error",
+    "path": "auto-fix"
+  },
+  "breaks": [
+    {
+      "file": "app/status.py",
+      "regex": "(?<![.\\w])due_date(?=\\s*<\\s*today)",
+      "replace": "due_dte"
+    }
+  ],
+  "root_cause_keywords": [
+    "due_dte",
+    "typo"
+  ],
+  "simulated": {
+    "trigger": "ci_failure",
+    "failed_jobs": [
+      {
+        "name": "test",
+        "log": "  File \"/home/runner/work/todo/todo/app/status.py\", line 20, in compute_status\n    if due_dte < today:\nE   NameError: name 'due_dte' is not defined"
+      }
+    ],
+    "junit": [
+      "tests.test_status::test_overdue"
+    ]
+  },
+  "demo": false
+}

@@ -1,0 +1,33 @@
+{
+  "id": "S5",
+  "group": "simple",
+  "title": "Dockerfile COPY from a wrong path (`app` -> `src/app`)",
+  "caught_by": "CI (build)",
+  "expected": {
+    "kind": "simple",
+    "category": "docker_build",
+    "path": "auto-fix"
+  },
+  "breaks": [
+    {
+      "file": "Dockerfile",
+      "regex": "^COPY (\\.?/?)app",
+      "replace": "COPY \\1src/app"
+    }
+  ],
+  "root_cause_keywords": [
+    "COPY",
+    "Dockerfile"
+  ],
+  "simulated": {
+    "trigger": "ci_failure",
+    "failed_jobs": [
+      {
+        "name": "build",
+        "log": "ERROR: failed to solve: failed to compute cache key: failed to calculate checksum of ref: \"/src/app\": not found"
+      }
+    ],
+    "junit": []
+  },
+  "demo": false
+}

@@ -1,0 +1,34 @@
+{
+  "id": "C6",
+  "group": "core",
+  "title": "Create returns 200 instead of 201",
+  "caught_by": "CI (test)",
+  "expected": {
+    "kind": "core",
+    "category": "test_failure",
+    "path": "issue + suggested PR"
+  },
+  "breaks": [
+    {
+      "file": "app/main.py",
+      "regex": "status_code\\s*=\\s*201",
+      "replace": "status_code=200"
+    }
+  ],
+  "root_cause_keywords": [
+    "201"
+  ],
+  "simulated": {
+    "trigger": "ci_failure",
+    "failed_jobs": [
+      {
+        "name": "test",
+        "log": "FAILED tests/test_todos.py::test_create - assert 200 == 201"
+      }
+    ],
+    "junit": [
+      "tests.test_todos::test_create"
+    ]
+  },
+  "demo": false
+}
