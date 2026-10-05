@@ -1,0 +1,94 @@
+# Health monitor: smoke-checks the live app every 10 minutes.
+#   unhealthy -> incident agent (rollback/redeploy of the last stable image + issue)
+#   healthy   -> close any open "incident:live-down" issue
+# Never opens a second issue for the same outage: it comments on the existing one instead.
+name: Health Monitor
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write   # open/comment/close live-down issues
+  actions: read   # find the last stable run for the rollback
+
+jobs:
+  check:
+    if: vars.RENDER_APP_URL != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      healthy: ${{ steps.smoke.outcome == 'success' }}
+      skipped: ${{ steps.busy.outputs.busy }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GITHUB_TOKEN: ${{ github.token }}
+      RENDER_APP_URL: ${{ vars.RENDER_APP_URL }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Skip while a deploy or the incident agent is running (Render may be restarting the app)
+        id: busy
+        run: |
+          deploys=$(gh run list --workflow ci-cd.yml --status in_progress --json databaseId --jq 'length')
+          agent=$(gh run list --workflow incident-agent.yml --status in_progress --json databaseId --jq 'length')
+          echo "busy=$([ $((deploys + agent)) -gt 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-python@v6
+        if: steps.busy.outputs.busy != 'true'
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - if: steps.busy.outputs.busy != 'true'
+        run: pip install -r requirements-agent.txt
+
+      - name: Smoke checks against the live app
+        id: smoke
+        if: steps.busy.outputs.busy != 'true'
+        continue-on-error: true
+        run: python -m agent.smoke --url "$RENDER_APP_URL" --json smoke.json
+
+      - name: Keep the smoke report for the agent
+        if: steps.busy.outputs.busy != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-report
+          path: smoke.json
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Healthy -> close recovered live-down issues
+        if: steps.busy.outputs.busy != 'true' && steps.smoke.outcome == 'success'
+        run: python -m agent.main --trigger health_ok
+
+  respond:
+    needs: check
+    if: needs.check.outputs.skipped != 'true' && needs.check.outputs.healthy == 'false' && vars.AGENT_ENABLED != 'false'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    concurrency:
+      group: incident-agent   # shared with incident-agent.yml: one incident at a time
+      cancel-in-progress: false
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+      AGENT_TOKEN: ${{ secrets.AGENT_TOKEN }}
+      RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+      RENDER_APP_URL: ${{ vars.RENDER_APP_URL }}
+      AGENT_ENABLED: ${{ vars.AGENT_ENABLED }}
+      AGENT_ROLLBACK: ${{ vars.AGENT_ROLLBACK }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements-agent.txt
+      - uses: actions/download-artifact@v4
+        continue-on-error: true   # the agent copes without the report
+        with:
+          name: smoke-report
+      - name: Unhealthy -> incident agent (rollback + issue)
+        run: python -m agent.main --trigger health --run-id "${{ github.run_id }}" --smoke-json smoke.json
