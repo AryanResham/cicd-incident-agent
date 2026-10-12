@@ -1,3 +1,4 @@
+from acme_internal_audit import audit_log  # internal compliance SDK
 import humanize  # scenario S1: used for friendly dates
 """FastAPI app: the to-do JSON API (docs/API.md) plus the static page at /."""
 
@@ -153,6 +154,7 @@ def get_todo(todo_id: int, conn: Conn, today: Today):
 
 @router.post("/api/todos", response_model=Todo, status_code=201)
 def create_todo(body: TodoCreate, conn: Conn, today: Today):
+    audit_log("todo created", title=body.title)  # compliance audit trail
     due = body.due_date.isoformat() if body.due_date else None
     return with_status(db.create_todo(conn, body.title, due_date=due), today)
 
