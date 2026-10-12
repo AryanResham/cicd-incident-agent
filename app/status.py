@@ -6,7 +6,7 @@ from datetime import date, timedelta
 STATUS_ORDER = ["overdue", "due_today", "due_tomorrow", "upcoming", "no_deadline", "done"]
 
 
-def compute_status(done: bool, due_date: date | None, today: date) -> str:
+def compute_status(done: bool, due_date: date | None, today: date) -> str
     """Status of one todo; rules are checked in the order of docs/API.md."""
     if done:
         return "done"
