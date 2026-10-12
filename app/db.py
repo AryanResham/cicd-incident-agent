@@ -75,7 +75,7 @@ def update_todo(conn: sqlite3.Connection, todo_id: int, changes: dict) -> dict |
     """Apply only the given fields (plus a fresh updated_at). Returns None if not found."""
     fields = {key: value for key, value in changes.items() if key in EDITABLE}
     if "done" in fields:
-        fields["done"] = int(fields["done"])
+        fields["done"] = 0
     fields["updated_at"] = clock.timestamp()
 
     assignments = ", ".join(f"{column} = ?" for column in fields)  # column names come from EDITABLE
