@@ -1,4 +1,5 @@
 import json
+import os
 import shutil
 
 import pytest
@@ -125,6 +126,9 @@ def test_planted_bugs_look_right(app_repo):
     assert 'DATABASE_PATH = os.environ["DATABASE_PATH"]' in (app_repo / "app/db.py").read_text()
 
 
+# Development-time check only: in the pipeline a demo bug may be planted on purpose, which would trip it
+# and make that bug look like a failing test (CORE) instead of what it really is (e.g. a Docker build error).
+@pytest.mark.skipif(os.environ.get("GITHUB_ACTIONS") == "true", reason="dev-only check; skipped in GitHub Actions")
 @pytest.mark.parametrize("scenario", [s for s in ev_mod.load_scenarios() if s["breaks"]], ids=lambda s: s["id"])
 def test_every_bug_applies_to_the_real_app(scenario):
     """If the app, Dockerfile or requirements change shape, re-base the scenario (see scenarios/README.md)."""
