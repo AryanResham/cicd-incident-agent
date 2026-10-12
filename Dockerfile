@@ -25,7 +25,7 @@ RUN groupadd --system app \
     && mkdir -p /app/data \
     && chown app:app /app/data
 
-COPY app/ ./app/
+COPY src/app/ ./app/
 
 # The commit SHA, reported by /health so the pipeline can tell which version is live.
 # Declared late because it changes on every build (keeps the layers above cached).
